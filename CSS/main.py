@@ -446,7 +446,7 @@ class thrClient(Thread):
         super(thrClient, self).__init__()
         PORT = 6129
 
-        SERVER = '211.243.176.12'#'13.124.19.47'
+        SERVER = '13.124.19.47'#'211.243.176.12'#'13.124.19.47'
         #'13.124.19.47' aws #'localhost'#'211.243.176.12'
 
         ADDR = (SERVER, PORT)
