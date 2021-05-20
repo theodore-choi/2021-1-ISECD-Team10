@@ -1,43 +1,40 @@
 # -*- coding: utf-8 -*-
 
-import sys
+
 from PyQt5.QtWidgets import *
 from PyQt5 import uic
-import random
-import itertools
-import threading
+import random, itertools, threading, os, socket, cv2, time, sys, paramiko, stat, psutil, subprocess, atexit
 from requests import get
 from DB_contorol import saveDB
 from threading import Thread
-import os
-import socket
-import time
-import cv2
-import sys
 from os.path import exists
 import numpy as np
-import psutil,subprocess
-import paramiko, stat
-FORMAT = 'utf-8'
-# temp data
 
-protoPath = "face_detector/deploy.prototxt"
-modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
-PR_guestlist =None
-pauseclass = False
-socketClient = False
-sftp = None
+'''
+/***************************************************************/
+            user( 사용자 정보를 다루는 클래스 전역 선언 )
+            전역 변수 초기화 
+            모델 로드
+            SSH 모듈 로드
+            얼굴인식모델 로드 
+
+            소켓 통신 모듈 전역 선언
+            게스트 리스트 UI모듈 전역 선언
+            게스트 리스트 전역선언
+            일시정지에 필요한 변수 전역 선언
+            app 어플리케이션 전역 선언
+
+/*************************시작**************************************/
+'''
 
 
-
-form_class = uic.loadUiType("CSS_Main.ui")[0]
 # pip install requests
 def ipcheck():
-	return get("https://api.ipify.org").text
+    return get("https://api.ipify.org").text
+
 
 class UserInfo:
-    userType = False #  presenter: false /student : True
+    userType = False  # presenter: false /student : True
     cam_is_valid = True
     User_is_on_seat = True
     classRoom_id = ''
@@ -47,11 +44,38 @@ class UserInfo:
     breakaway = ''
     name = ''
     address = ''
+
     def __init__(self):
         self.address = ipcheck()
 
 
 user = UserInfo()
+
+FORMAT = 'utf-8'
+# temp data
+host = '13.124.19.47'
+username = 'ec2-user'
+ssh = paramiko.SSHClient()
+ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.connect(host, username=username, key_filename='jusu.pem')
+sftp = None
+sftp = ssh.open_sftp()
+
+protoPath = "face_detector/deploy.prototxt"
+modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
+
+PR_guestlist = None
+pauseclass = False
+socketClient = False
+app = None
+
+student_login_list = []
+
+form_class = uic.loadUiType("CSS_Main.ui")[0]
+
+'''/*****************************종료**********************************************/'''
+
 
 def returnRoomNumber():
     numbers = list(itertools.combinations('123456789', 5))
@@ -77,26 +101,37 @@ class MyWindow(QMainWindow, form_class):
         self.Student_button.clicked.connect(self.btn_st_clicked)
 
     def btn_clicked(self):
-        #QMessageBox.about(self, "message", "clicked")
-        self.hide()
-        #self.setDisabled(True)
+        # QMessageBox.about(self, "message", "clicked")
+        self.setDisabled(True)
+        # self.setDisabled(True)
         self.PR_login = PR_LOGIN(self)
-        #self.PR_login.exec_()
-        #self.show()
+        # self.PR_login.exec_()
+        # self.show()
 
     def btn_st_clicked(self):
-        self.hide()
+        self.setDisabled(True)
         # QMessageBox.about(self, "message", "clicked")
-        #self.setDisabled(True)
+        # self.setDisabled(True)
         self.ST_login = ST_LOGIN(self)
-        #self.show()
+        # self.show()
+
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
 
 class PR_LOGIN(QDialog):
-    def __init__(self,parent):
-        super(PR_LOGIN,self).__init__(parent)
+    def __init__(self, parent):
+        super(PR_LOGIN, self).__init__(parent)
         pr_login_ui = 'PR_LOGIN.ui'
-        uic.loadUi(pr_login_ui,self)
-        #self.Insert_Name.textChanged.connect()
+        uic.loadUi(pr_login_ui, self)
+        # self.Insert_Name.textChanged.connect()
 
         self.Login_Button.clicked.connect(self.btn_login_clicked)
         self.Back_Button.clicked.connect(self.btn_Back)
@@ -104,9 +139,11 @@ class PR_LOGIN(QDialog):
 
         # self.Insert_PW.setText()
         self.show()
+
     def btn_Back(self):
-        #self.parent.show()
+        # self.parent.show()
         self.close()
+
     def btn_login_clicked(self):
         # name is valid
         name = self.Insert_Name.text()
@@ -119,15 +156,15 @@ class PR_LOGIN(QDialog):
 
         serial_list = saveDB("select licencekey from room_info")
         # 5 item or serial
-        #serial_list = ['145XER111', '123EQQ345', '134RKGI13', 'GG36728EE', 'ER345GGHH']
+        # serial_list = ['145XER111', '123EQQ345', '134RKGI13', 'GG36728EE', 'ER345GGHH']
         islicense = False
-        if not name == '' or serial =='': # 145XER111
+        if not name == '' or serial == '':  # 145XER111
             for n in serial_list:
-                if serial in n: ## serial key is matching !!
+                if serial in n:  ## serial key is matching !!
                     isalready = saveDB(f"select user_name, licencekey from room_info where licencekey='{serial}'")
-                    #serial_list.remove(serial) # delete query in DB
-                    if isalready[0][0] == None or (isalready[0][0] == name and isalready[0][1] == serial): #
-                        user.userType = False # presenter
+                    # serial_list.remove(serial) # delete query in DB
+                    if isalready[0][0] == None or (isalready[0][0] == name and isalready[0][1] == serial):  #
+                        user.userType = False  # presenter
                         user.license_number = serial
                         user.name = name
                         islicense = True
@@ -144,17 +181,30 @@ class PR_LOGIN(QDialog):
         if not islicense:
             QMessageBox.about(self, "Warning", "Serial key is not matching, Please retry")
 
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
+
 class ST_LOGIN(QDialog):
-    def __init__(self,parent):
-        super(ST_LOGIN,self).__init__(parent)
+    def __init__(self, parent):
+        super(ST_LOGIN, self).__init__(parent)
         st_login_ui = 'ST_LOGIN.ui'
-        uic.loadUi(st_login_ui,self)
+        uic.loadUi(st_login_ui, self)
 
         self.Login.clicked.connect(self.btn_login_clicked)
         self.Cancle.clicked.connect(self.btn_Close)
         self.show()
+
     def btn_Close(self):
         self.close()
+
     def btn_login_clicked(self):
         st_name = self.StudentName.text()
         roomnum = self.ClassRoom.text()
@@ -164,26 +214,25 @@ class ST_LOGIN(QDialog):
         elif roomnum == '':
             QMessageBox.about(self, "Warning", "Room Code을 입력해주세요!")
 
-        #Room_list = ['81sp236l', '65v43us9', '3ls5864c', '34i72pz6', '8ts542u1']
+        # Room_list = ['81sp236l', '65v43us9', '3ls5864c', '34i72pz6', '8ts542u1']
 
         Room_list = saveDB("select room_code from room_info where room_code is not null")
         isnoRoom = True
-        if not st_name == '' or roomnum =='': # 81sp236l
+        if not st_name == '' or roomnum == '':  # 81sp236l
             for room in Room_list:
-                if roomnum in room: ## serial key is matching !!
+                if roomnum in room:  ## serial key is matching !!
                     # db user info insert
                     self.hide()
-                    user.userType = True #'student'
+                    user.userType = True  # 'student'
                     user.license_number = ''
                     # 캠이 켜져있는지
-                    #user.cam_is_valid = False # ?
+                    user.cam_is_valid = True  # ?
                     # 자리에 있는지 ?
-                    #user.User_is_on_seat = False
+                    user.User_is_on_seat = False
                     #
 
                     user.sleep = False
                     user.breakaway = False
-
 
                     # db Query insert room number
                     user.classRoom_id = roomnum
@@ -194,10 +243,19 @@ class ST_LOGIN(QDialog):
         if isnoRoom:
             QMessageBox.about(self, "Warning", "Room Code is not valid, Please retry")
 
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
 
-def CreateRawFile(type, name): #
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
+
+def CreateRawFile(type, name):  #
     remote_path = '/home/ec2-user/CSS/'
-
     if type == 'file':
         file = name
         remote_file = remote_path + file
@@ -223,6 +281,7 @@ def CreateRawFile(type, name): #
 
     print("done")
 
+
 class PR_PAGE(QDialog):
 
     def __init__(self, parent):
@@ -239,7 +298,7 @@ class PR_PAGE(QDialog):
 
         # room info, user_info DB table 에 user, room code 등록
         # 기존 로그인과 동일하다면?
-        currentDB= saveDB(f"select user_name, licencekey from room_info where licencekey='{user.license_number}'")
+        currentDB = saveDB(f"select user_name, licencekey from room_info where licencekey='{user.license_number}'")
         same = True
         if not currentDB:  # 아예 정보가 없거나
             user.classRoom_id = roomnumber
@@ -247,7 +306,7 @@ class PR_PAGE(QDialog):
             msg = f"update room_info set user_name = '{user.name}', room_code = '{user.classRoom_id}' where licencekey = '{user.license_number}'"
             saveDB(msg)
             self.lineEdit_room.setText(roomnumber)
-        else:           # 새로운 정보일때만
+        else:  # 새로운 정보일때만
             if not (currentDB[0][0] == user.name and currentDB[0][1] == user.license_number):
                 user.classRoom_id = roomnumber
                 same = False
@@ -255,42 +314,54 @@ class PR_PAGE(QDialog):
                 saveDB(msg)
                 self.lineEdit_room.setText(roomnumber)
             else:
-                user.classRoom_id = roomnumber = saveDB(f"select room_code from room_info where licencekey = '{user.license_number}'")[0][0]
+                user.classRoom_id = roomnumber = \
+                saveDB(f"select room_code from room_info where licencekey = '{user.license_number}'")[0][0]
                 self.lineEdit_room.setText(roomnumber)
-
 
         forignkey = saveDB(f"select classroom_id from room_info where licencekey='{user.license_number}'")[0][0]
 
         # classroom_id 폴더 서버에 생성하기
-        CreateRawFile('folder',str(forignkey))
-        if not same:    # 기존의 로그인정보가 없는 경우 추가
+        CreateRawFile('folder', str(forignkey))
+        if not same:  # 기존의 로그인정보가 없는 경우 추가
             msg = f"insert into user_info values(default, " \
                   f"'{forignkey}','{user.name}','{user.address}','{user.userType}'" \
-                  f", True, True, False)"
+                  f", True, False, False)"
             saveDB(msg)
         user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
         CreateRawFile('folder', str(forignkey) + '/' + str(user_id))
 
         # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
         global socketClient
-        socketClient = thrClient(user)
+        socketClient = thrClient()
         socketClient.set_eventobj(event)
+        socketClient.daemon = True
         socketClient.start()
-
 
         self.show()
 
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
     def onSelected(self):
         selected = self.Class_Status.currentText()
+        # 수업시 학생이 한명이상이어야 한다.
         if not selected == '':
             user.classOrder = selected
             msg = selected + ',' + user.classRoom_id
             socketClient.send(msg)
-            #dp update
+            # dp update
             forignkey = saveDB(f"select classroom_id from room_info where room_code='{user.classRoom_id}'")[0][0]
             msg = f"insert into order_records values(default, " \
                   f"'{forignkey}','{selected}',current_timestamp)"
             saveDB(msg)
+
 
 class ST_PAGE(QDialog):
     def __init__(self, parent):
@@ -308,66 +379,85 @@ class ST_PAGE(QDialog):
         currentDB = saveDB(f"select user_name, user_ip from user_info where user_ip='{user.address}'")
         # 동일 유저인지확인하는 변수 same
         same = True
-        if not currentDB: # 만일 조회되지 않는다면 신규 유저이므로 등록을 진행한다.
-            same = False            # 동일 유저가 아니므로 false
+        if not currentDB:  # 만일 조회되지 않는다면 신규 유저이므로 등록을 진행한다.
+            same = False  # 동일 유저가 아니므로 false
             msg = f"insert into user_info values(default, '{forienkey}', '{user.name}','{user.address}','{user.userType}', True, True, False)"
-            saveDB(msg) # 신규 유저 정보를 user_info 테이블에 insert 한다.
+            saveDB(msg)  # 신규 유저 정보를 user_info 테이블에 insert 한다.
             user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
             # classroom_id 폴더 서버에 생성하기
             CreateRawFile('folder', str(forienkey) + '/' + str(user_id))
-        else:# 기존에 등록되어있는 정보가 조회된다면?
-            if currentDB[0][1] != user.address and currentDB[0][0] == user.name: # ip 정보가 다르다면 다른 pc에서 접속한 것이므로, 이름은 같더라도 동일 인물일 수 있음, 따라서 등록을 진행한다.
+        else:  # 기존에 등록되어있는 정보가 조회된다면?
+            if currentDB[0][1] != user.address and currentDB[0][
+                0] == user.name:  # ip 정보가 다르다면 다른 pc에서 접속한 것이므로, 이름은 같더라도 동일 인물일 수 있음, 따라서 등록을 진행한다.
                 same = False
                 msg = f"insert into user_info values(default, '{forienkey}', '{user.name}','{user.address}','{user.userType}', True, True, False)"
                 saveDB(msg)
                 user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
                 # classroom_id 폴더 서버에 생성하기
-                CreateRawFile('folder', str(forienkey)+ '/' + str(user_id))
-            else:   #기존의 등록되어있으면 아이피가 동일하다거나, 이름이 다르기만한? 동일 유저 인경우 여기에 들어온다.
-                #유저 이름 정도 업데이트
+                CreateRawFile('folder', str(forienkey) + '/' + str(user_id))
+            else:  # 기존의 등록되어있으면 아이피가 동일하다거나, 이름이 다르기만한? 동일 유저 인경우 여기에 들어온다.
+                # 유저 이름 정도 업데이트
                 saveDB(f"update user_info set user_name='{user.name}' where user_ip='{user.address}'")
 
         event = threading.Event()
         event.clear()
-        #thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
+        # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
         global socketClient
-        socketClient = thrClient(user)
+        socketClient = thrClient()
         socketClient.set_eventobj(event)
+        socketClient.daemon = True  # 프로그램 종료시 프로세스도 함께 종료 (백그라운드 재생 X)
         socketClient.start()
-        #전송시 ip, 사용자 이름, 사용자
-        #self.message.send('주수현')
+        # 전송시 ip, 사용자 이름, 사용자
+        # self.message.send('주수현')
 
         self.show()
+
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
     def onSelected(self):
         selected = self.Class_Status.currentText()
-        self.process.paused = 'pause'
+        # self.process.paused = 'pause'
 
+        global pauseclass
         # DB update
         # select student list
-        if selected == 'OFF':
+
+        if selected == 'OFF' and (user.classOrder == '수업시작' or user.classOrder == '수업재개'):
+            pauseclass = False  # 얼굴인식,프로세스 킬 일시 중지.
             # db update status order item
             # select student list
             user.User_is_on_seat = False
             # DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
             uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
-            saveDB(f"update user_info set cam_status='{self.camOn}' where user_ip='{user.address}'")
+            # 현재 캠 정보랑
+            saveDB(
+                f"update user_info set cam_status='{user.cam_is_valid}',emergency_status='{user.User_is_on_seat}' where user_ip='{user.address}'")
 
             msg = f"insert into state_records values(default, " \
                   f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{selected}','{user.cam_is_valid}','{user.User_is_on_seat}',current_timestamp)"
             saveDB(msg)
-        if selected == 'On':
-            user.User_is_on_seat = False
+        if selected == 'On' and (user.classOrder == '수업시작' or user.classOrder == '수업재개'):
+            user.User_is_on_seat = True
             # DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
             uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
-            saveDB(f"update user_info set cam_status='{self.camOn}' where user_ip='{user.address}'")
+            saveDB(
+                f"update user_info set cam_status='{user.cam_is_valid}',emergency_status='{user.User_is_on_seat}' where user_ip='{user.address}'")
 
             msg = f"insert into state_records values(default, " \
                   f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{selected}','{user.cam_is_valid}','{user.User_is_on_seat}',current_timestamp)"
             saveDB(msg)
 
-            global pauseclass
-            pauseclass = True # 얼굴인식,프로세스 킬 일시 중지.
-            #self.process.set_eventobj(None) # thread 종료
+            pauseclass = True  # 얼굴인식,프로세스 킬 일시 중지.
+            # self.process.set_eventobj(None) # thread 종료
+
 
 class CSS_CAM_POPUP(QDialog):
     def __init__(self, parent):
@@ -375,6 +465,17 @@ class CSS_CAM_POPUP(QDialog):
         css_popup_ui = 'CSS_CAM_POPUP.ui'
         uic.loadUi(css_popup_ui, self)
         self.show()
+
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            # exit_program()
+        else:
+            QCloseEvent.ignore()
+
 
 class PR_GUEST_LIST(QDialog):
     def __init__(self, parent):
@@ -384,84 +485,100 @@ class PR_GUEST_LIST(QDialog):
         self.move(1250, 250)
         self.show()
 
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
 
-def rcvMsg(sock, userInfo): ## 서버로부터 메세지를 수신 받는 부분
-    global PR_guestlist
-    if userInfo.userType == True:
-        event = threading.Event()
-        event.clear()
-        facedetector = thrFaceDetection()
-        process = thrProcessKill()
-    while True:
-        try:
-            data = sock.recv(1024)
-            if not data:
-                break
-            if userInfo.userType == True: # student
-                msg = data.decode()
-                print(msg)
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
 
-                global pauseclass
-                if msg == '수업시작':
-                    # thread 2 수업시작 명령시 얼굴인식 Thread on
-                    facedetector.set_eventobj(event)
-                    facedetector.start()
-                    # thread 3 수업 시작 명령시 게임, 메신저 프로세스 감시 thread on
-                    process.set_eventobj(event)
-                    process.start()
-                if msg == '쉬는시간':
-                    pauseclass = True
-                if msg == '수업재개':
-                    pauseclass = False
-                if msg == '수업종료':
-                    process.set_eventobj(None)
-                    facedetector.set_eventobj(None)
-
-
-            elif userInfo.userType == False: # 교수는 학생 이름을 모니터링 할 수 있다.
-                msg = data.decode()
-                notmsg = []
-                notmsg.append(userInfo.name)# 자신의 이름
-                notmsg.append('수업시작')   # 수업명령
-                notmsg.append('쉬는시간')
-                notmsg.append('수업재개')
-                notmsg.append('수업종료')
-                if msg[:6] == 'remove':
-                    msg = msg[7:]
-                    for x in range(PR_guestlist.student_list.count()): ## logout
-                        if msg == PR_guestlist.student_list.item(x).text():
-                            PR_guestlist.student_list.takeItem(x)
-                            break
-                    #find = PR_guestlist.student_list.findItems(QtCore.QString(msg))
-                    #PR_guestlist.student_list.removeItemWidget(find)
-                else:
-                    if not msg in notmsg: # 학생인 경우만 add Item
-                        PR_guestlist.student_list.addItem(msg)
-
-                print(msg)
-
-        except:
-            pass
 
 class thrClient(Thread):
     event = None
-    def __init__(self, userInfo):
+
+    def __init__(self):
         super(thrClient, self).__init__()
         PORT = 6129
 
-        SERVER = '13.124.19.47'#'211.243.176.12'#'13.124.19.47'
-        #'13.124.19.47' aws #'localhost'#'211.243.176.12'
+        SERVER = '13.124.19.47'  # '211.243.176.12'#'13.124.19.47'
+        # '13.124.19.47' aws #'localhost'#'211.243.176.12'
 
         ADDR = (SERVER, PORT)
 
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client.connect(ADDR)
 
-        t = Thread(target=rcvMsg, args=(self.client,userInfo))
+        t = Thread(target=self.rcvMsg, args=())
         t.daemon = True
         t.start()
-        self.client.send(str(userInfo.name+','+ userInfo.classRoom_id).encode()) # 서버에서 유저를 최초로 등록을 한다.
+        self.client.send(str(user.name + ',' + user.classRoom_id).encode())  # 서버에서 유저를 최초로 등록을 한다.
         # 그 이후 메시지는 자율적으로 보낸다. self.client.send
+
+    def rcvMsg(self):  ## 서버로부터 메세지를 수신 받는 부분
+        global PR_guestlist
+        while True:
+            try:
+                data = self.client.recv(1024)
+                if not data:
+                    break
+                if user.userType == True:  # student
+                    msg = data.decode()
+                    print(msg)
+
+                    global pauseclass
+                    if msg == '수업시작':
+                        user.classOrder = msg
+                        event = threading.Event()
+                        event.clear()
+                        facedetector = thrFaceDetection(detector)
+                        process = thrProcessKill()
+                        # thread 2 수업시작 명령시 얼굴인식 Thread on
+                        facedetector.set_eventobj(event)
+                        facedetector.daemon = True
+                        facedetector.start()
+                        # thread 3 수업 시작 명령시 게임, 메신저 프로세스 감시 thread on
+                        process.set_eventobj(event)
+                        process.daemon = True
+                        process.start()
+                    if msg == '쉬는시간':
+                        user.classOrder = msg
+                        pauseclass = True
+                    if msg == '수업재개':
+                        user.classOrder = msg
+                        pauseclass = False
+                    if msg == '수업종료':
+                        user.classOrder = msg
+                        process.set_eventobj(None)
+                        facedetector.set_eventobj(None)
+
+
+                elif user.userType == False:  # 교수는 학생 이름을 모니터링 할 수 있다.
+                    msg = data.decode()
+                    notmsg = []
+                    notmsg.append(user.name)  # 자신의 이름
+                    notmsg.append('수업시작')  # 수업명령
+                    notmsg.append('쉬는시간')
+                    notmsg.append('수업재개')
+                    notmsg.append('수업종료')
+                    if msg[:6] == 'remove':
+                        msg = msg[7:]
+                        for x in range(PR_guestlist.student_list.count()):  ## logout
+                            if msg == PR_guestlist.student_list.item(x).text():
+                                PR_guestlist.student_list.takeItem(x)
+                                break
+                        # find = PR_guestlist.student_list.findItems(QtCore.QString(msg))
+                        # PR_guestlist.student_list.removeItemWidget(find)
+                    else:
+                        if msg not in notmsg:  # 학생인 경우만 add Item
+                            PR_guestlist.student_list.addItem(msg)
+                            student_login_list.append(msg)  ## 출석 체크한 학생 추가
+                    print(msg)
+
+            except:
+                pass
 
     def set_eventobj(self, Event):
         self.event = Event
@@ -471,13 +588,12 @@ class thrClient(Thread):
             if not self.event:
                 break
 
-
     def send(self, msg):
         # 여기서 문자열을 전송할 때 encode()을 이용한다
         # 파이썬 문자열의 encode() 메소드는 문자열을 byte로 변환해주는 메소드이기 때문이다.
 
         self.client.send(msg.encode())
-        #print(self.client.recv(2048).decode())
+        # print(self.client.recv(2048).decode())
         # print(client.recv(2048).decode(FORMAT))
         # client.close()
 
@@ -514,6 +630,7 @@ class thrClient(Thread):
 
         # send(DISCONNECT_MESSAGE)
 
+
 def getProcessRunList():
     pc_list = []
     for proc in psutil.process_iter():
@@ -522,36 +639,89 @@ def getProcessRunList():
             processName = proc.name()
             processID = proc.pid
             pc_list.append(processName)
-            #print(processName, ' - ', processID)
+            # print(processName, ' - ', processID)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):  # 예외처리
             pass
     return pc_list
 
+
 class thrProcessKill(threading.Thread):
     event = None
+
     def __init__(self):
         super(thrProcessKill, self).__init__()
+
     def set_eventobj(self, Event):
         self.event = Event
 
     def run(self):
-        #if self.event == None:
+        # if self.event == None:
         #    return
-        #global paused
+        # global paused
         global pauseclass
-        #prevCamStatus = False
+        # prevCamStatus = False
         while (self.event):
             if not pauseclass:
-                #prevCamStatus = self.camOn
+                # prevCamStatus = self.camOn
                 myprocesslist = getProcessRunList()  # 현재 실행중인 프로세스 리스트 불러오기
                 myset = set(myprocesslist)  # 중복값 제거
                 my_list = list(myset)  # 리스트로 변환
 
-                block_Process_list = ['KakaoTalk.exe', 'LeagueClient.exe', 'RiotClientServices.exe','fifa4launcher.exe','fifa4zf.exe','nProtect.exe','Webview-render.exe','GnAgent.exe','GameBar.exe','GameBarFTServer.exe','NGM64.exe','GnStart.exe','BlackCipher64.aes','Discord.exe','kakaotalk.exe','Gersang.exe','Gunz.exe','BlackDesert32.exe','BlackDesert64.exe','PSkin.exe','goonzu.exe','Client_Shipping.exe   ','nal.exe','NoxGame.exe','poker.exe','Baduk2.exe','JangGi.exe','Northgard.exe','NX.exe','NFSEdge.exe','Dungeons3.exe','deadcells.exe','destiny2.exe','ActionSquad.exe','dota2.exe','DragonNest.exe','dro_client.exe','Droiyan Online.exe','Zero Ragexe.exe','Layers Of Fear.exe','RainbowSix.exe','RailwayEmpire.exe','LoR.exe','lodoss.exe','LOSTARK.exe','League of Legends.exe','LolClient.exe','LolClient.exe','LeagueClient.exe','Lineage2M.exe','Ma9Ma9Remaster.exe','Marvel End Time Arena.exe','MarvelHeroes2016.exe','client.exe','Mafia3.exe','MapleStory2.exe','MapleStory.exe','FTGame.exe','MULegend.exe','mir2.exe','mir2_WinMode.exe','vikings.exe','VALORANT-Win64-Shipping.exe','TslGame.exe','Battlerite.exe','BattleriteRoyale.exe','Borderlands2.exe','BorderlandsPreSequel.exe','BoilingBolt-Win64-Shipping.exe','VictorVran.exe','puyopuyoesports.exe','Syberia3.exe','Cyphers.exe','ShadowArena64.exe','shadows.exe','SuddenStrike4.exe','suddenattack.exe','seiya.exe','Sherlock.exe','smc.exe','SoulWorker.exe','SuperPixelRacers.exe','SSF_Release.exe','starcraft.exe','Steredenn.exe','StrikersEdge.exe','Splasher.exe','CivilizationV_DX11.exe','CivilizationVI.exe','CivBE_Win32_DX11.exe','Client.exe','Arpiel.exe','Asgard.exe','Astellia.exe','game.bin','Indiana-Win64-Shipping.exe','iron_sight.exe','Atlantica.exe','Ancestors-Win64-Shipping.exe','Legend.exe','AscendantOne-Win64-Shipping.exe','EOS.exe','ACEonline.atm','shooter_win64_release.exe','XCom2.exe','XCom2_WOTC.exe','ELYON.exe','x2.exe','YG2.exe','EternalReturn.exe','OrO20.exe','OldSchoolMusical.exe','TheObserver-Win64-Shipping.exe','WB.exe','Warcraft III.exe','WorldOfWarships.exe','ImmortalRealms.exe','City3.exe','Elancia.exe','Genesis4Live.exe','PSkinII.exe','Sky.exe','Sky_x64.exe','MFishing.exe','MCGame-Final.exe','TslGame.exe','engine.exe','ctgo2.exe','CoreMasters.exe','ModernWarfare.exe','BlackOps4.exe','BlackOpsColdWar.exe','crossfire.exe','Crookz.exe','CW.EXE','TygemBaduk.exe','InphaseNXD.exe','Tropico5.exe','Tropico6-Win64-Shipping.exe','Client_tos.exe','  Client_tos_x64.exe','PointBlank.exe','FortniteClient-Win64-Shipping.exe','FortressV2.exe','Furi.exe','HitGame.exe','FSeFootball.exe','pmangPoker.exe','pmangvegas.exe','PMANGSLOTS.exe','fifazf.exe','PillarsOfEternity.exe','Hearthstone.exe','HoundsApp.exe','HyperUniverse.exe','duelgo.exe','Hanjanggi.exe','Hand of Fate 2.exe','Hover.exe','Holic2.exe   ','Among US.exe','r5apex.exe','borealblade_64bit.exe','Cities.exe','CookingSim.exe','disco.exe','DyingLightGame.exe','Eco.exe','fifa4zf.exe','Forge and Fight.exe','FuryUnleashed.exe','hl2.exe','GasGuzzlers.exe','GTFO.exe','HelloNeighbor-Win64-Shipping.exe','HouseFlipper.exe','HuntGame.exe','Injustice2.exe','INSIDE.exe','Game-Win64-Shipping.exe','KingdomCome.exe','left4dead2.exe','Mordhau-Win64-Shipping.exe','LF-Win64-Shipping.exe','Phasmophobia.exe','hl2.exe','SpaceAssault-Win64-Shipping.exe','RimWorldWin64.exe','Shieldwall-Win64-Shipping.exe','Sky Force Reloaded.exe','Stardew Valley.exe','SH.exe','SuperliminalSteam.exe','Terraria.exe','TheForest.exe','witcher3.exe','TheyAreBillions.exe','thief.exe','Thrones.exe','Trailmakers.exe','trine4.exe','UltimateZombieDefense_64.exe','UnrailedGame.exe','YAZD_HD.exe']#['KakaoTalk.exe', 'LeagueClient.exe']
+                block_Process_list = ['KakaoTalk.exe', 'LeagueClient.exe', 'RiotClientServices.exe',
+                                      'fifa4launcher.exe', 'fifa4zf.exe', 'nProtect.exe', 'Webview-render.exe',
+                                      'GnAgent.exe', 'GameBar.exe', 'GameBarFTServer.exe', 'NGM64.exe', 'GnStart.exe',
+                                      'BlackCipher64.aes', 'Discord.exe', 'kakaotalk.exe', 'Gersang.exe', 'Gunz.exe',
+                                      'BlackDesert32.exe', 'BlackDesert64.exe', 'PSkin.exe', 'goonzu.exe',
+                                      'Client_Shipping.exe   ', 'nal.exe', 'NoxGame.exe', 'poker.exe', 'Baduk2.exe',
+                                      'JangGi.exe', 'Northgard.exe', 'NX.exe', 'NFSEdge.exe', 'Dungeons3.exe',
+                                      'deadcells.exe', 'destiny2.exe', 'ActionSquad.exe', 'dota2.exe', 'DragonNest.exe',
+                                      'dro_client.exe', 'Droiyan Online.exe', 'Zero Ragexe.exe', 'Layers Of Fear.exe',
+                                      'RainbowSix.exe', 'RailwayEmpire.exe', 'LoR.exe', 'lodoss.exe', 'LOSTARK.exe',
+                                      'League of Legends.exe', 'LolClient.exe', 'LolClient.exe', 'LeagueClient.exe',
+                                      'Lineage2M.exe', 'Ma9Ma9Remaster.exe', 'Marvel End Time Arena.exe',
+                                      'MarvelHeroes2016.exe', 'client.exe', 'Mafia3.exe', 'MapleStory2.exe',
+                                      'MapleStory.exe', 'FTGame.exe', 'MULegend.exe', 'mir2.exe', 'mir2_WinMode.exe',
+                                      'vikings.exe', 'VALORANT-Win64-Shipping.exe', 'TslGame.exe', 'Battlerite.exe',
+                                      'BattleriteRoyale.exe', 'Borderlands2.exe', 'BorderlandsPreSequel.exe',
+                                      'BoilingBolt-Win64-Shipping.exe', 'VictorVran.exe', 'puyopuyoesports.exe',
+                                      'Syberia3.exe', 'Cyphers.exe', 'ShadowArena64.exe', 'shadows.exe',
+                                      'SuddenStrike4.exe', 'suddenattack.exe', 'seiya.exe', 'Sherlock.exe', 'smc.exe',
+                                      'SoulWorker.exe', 'SuperPixelRacers.exe', 'SSF_Release.exe', 'starcraft.exe',
+                                      'Steredenn.exe', 'StrikersEdge.exe', 'Splasher.exe', 'CivilizationV_DX11.exe',
+                                      'CivilizationVI.exe', 'CivBE_Win32_DX11.exe', 'Client.exe', 'Arpiel.exe',
+                                      'Asgard.exe', 'Astellia.exe', 'game.bin', 'Indiana-Win64-Shipping.exe',
+                                      'iron_sight.exe', 'Atlantica.exe', 'Ancestors-Win64-Shipping.exe', 'Legend.exe',
+                                      'AscendantOne-Win64-Shipping.exe', 'EOS.exe', 'ACEonline.atm',
+                                      'shooter_win64_release.exe', 'XCom2.exe', 'XCom2_WOTC.exe', 'ELYON.exe', 'x2.exe',
+                                      'YG2.exe', 'EternalReturn.exe', 'OrO20.exe', 'OldSchoolMusical.exe',
+                                      'TheObserver-Win64-Shipping.exe', 'WB.exe', 'Warcraft III.exe',
+                                      'WorldOfWarships.exe', 'ImmortalRealms.exe', 'City3.exe', 'Elancia.exe',
+                                      'Genesis4Live.exe', 'PSkinII.exe', 'Sky.exe', 'Sky_x64.exe', 'MFishing.exe',
+                                      'MCGame-Final.exe', 'TslGame.exe', 'engine.exe', 'ctgo2.exe', 'CoreMasters.exe',
+                                      'ModernWarfare.exe', 'BlackOps4.exe', 'BlackOpsColdWar.exe', 'crossfire.exe',
+                                      'Crookz.exe', 'CW.EXE', 'TygemBaduk.exe', 'InphaseNXD.exe', 'Tropico5.exe',
+                                      'Tropico6-Win64-Shipping.exe', 'Client_tos.exe', '  Client_tos_x64.exe',
+                                      'PointBlank.exe', 'FortniteClient-Win64-Shipping.exe', 'FortressV2.exe',
+                                      'Furi.exe', 'HitGame.exe', 'FSeFootball.exe', 'pmangPoker.exe', 'pmangvegas.exe',
+                                      'PMANGSLOTS.exe', 'fifazf.exe', 'PillarsOfEternity.exe', 'Hearthstone.exe',
+                                      'HoundsApp.exe', 'HyperUniverse.exe', 'duelgo.exe', 'Hanjanggi.exe',
+                                      'Hand of Fate 2.exe', 'Hover.exe', 'Holic2.exe   ', 'Among US.exe', 'r5apex.exe',
+                                      'borealblade_64bit.exe', 'Cities.exe', 'CookingSim.exe', 'disco.exe',
+                                      'DyingLightGame.exe', 'Eco.exe', 'fifa4zf.exe', 'Forge and Fight.exe',
+                                      'FuryUnleashed.exe', 'hl2.exe', 'GasGuzzlers.exe', 'GTFO.exe',
+                                      'HelloNeighbor-Win64-Shipping.exe', 'HouseFlipper.exe', 'HuntGame.exe',
+                                      'Injustice2.exe', 'INSIDE.exe', 'Game-Win64-Shipping.exe', 'KingdomCome.exe',
+                                      'left4dead2.exe', 'Mordhau-Win64-Shipping.exe', 'LF-Win64-Shipping.exe',
+                                      'Phasmophobia.exe', 'hl2.exe', 'SpaceAssault-Win64-Shipping.exe',
+                                      'RimWorldWin64.exe', 'Shieldwall-Win64-Shipping.exe', 'Sky Force Reloaded.exe',
+                                      'Stardew Valley.exe', 'SH.exe', 'SuperliminalSteam.exe', 'Terraria.exe',
+                                      'TheForest.exe', 'witcher3.exe', 'TheyAreBillions.exe', 'thief.exe',
+                                      'Thrones.exe', 'Trailmakers.exe', 'trine4.exe', 'UltimateZombieDefense_64.exe',
+                                      'UnrailedGame.exe', 'YAZD_HD.exe']  # ['KakaoTalk.exe', 'LeagueClient.exe']
                 # ,'RiotClientServices.exe','fifa4launcher.exe','fifa4zf.exe','nProtect.exe','Webview-render.exe','GnAgent.exe','GameBar.exe','GameBarFTServer.exe','NGM64.exe','GnStart.exe','BlackCipher64.aes','Discord.exe','kakaotalk.exe','Gersang.exe','Gunz.exe','BlackDesert32.exe','BlackDesert64.exe','PSkin.exe','goonzu.exe','Client_Shipping.exe   ','nal.exe','NoxGame.exe','poker.exe','Baduk2.exe','JangGi.exe','Northgard.exe','NX.exe','NFSEdge.exe','Dungeons3.exe','deadcells.exe','destiny2.exe','ActionSquad.exe','dota2.exe','DragonNest.exe','dro_client.exe','Droiyan Online.exe','Zero Ragexe.exe','Layers Of Fear.exe','RainbowSix.exe','RailwayEmpire.exe','LoR.exe','lodoss.exe','LOSTARK.exe','League of Legends.exe','LolClient.exe','LolClient.exe','LeagueClient.exe','Lineage2M.exe','Ma9Ma9Remaster.exe','Marvel End Time Arena.exe','MarvelHeroes2016.exe','client.exe','Mafia3.exe','MapleStory2.exe','MapleStory.exe','FTGame.exe','MULegend.exe','mir2.exe','mir2_WinMode.exe','vikings.exe','VALORANT-Win64-Shipping.exe','TslGame.exe','Battlerite.exe','BattleriteRoyale.exe','Borderlands2.exe','BorderlandsPreSequel.exe','BoilingBolt-Win64-Shipping.exe','VictorVran.exe','puyopuyoesports.exe','Syberia3.exe','Cyphers.exe','ShadowArena64.exe','shadows.exe','SuddenStrike4.exe','suddenattack.exe','seiya.exe','Sherlock.exe','smc.exe','SoulWorker.exe','SuperPixelRacers.exe','SSF_Release.exe','starcraft.exe','Steredenn.exe','StrikersEdge.exe','Splasher.exe','CivilizationV_DX11.exe','CivilizationVI.exe','CivBE_Win32_DX11.exe','Client.exe','Arpiel.exe','Asgard.exe','Astellia.exe','game.bin','Indiana-Win64-Shipping.exe','iron_sight.exe','Atlantica.exe','Ancestors-Win64-Shipping.exe','Legend.exe','AscendantOne-Win64-Shipping.exe','EOS.exe','ACEonline.atm','shooter_win64_release.exe','XCom2.exe','XCom2_WOTC.exe','ELYON.exe','x2.exe','YG2.exe','EternalReturn.exe','OrO20.exe','OldSchoolMusical.exe','TheObserver-Win64-Shipping.exe','WB.exe','Warcraft III.exe','WorldOfWarships.exe','ImmortalRealms.exe','City3.exe','Elancia.exe','Genesis4Live.exe','PSkinII.exe','Sky.exe','Sky_x64.exe','MFishing.exe','MCGame-Final.exe','TslGame.exe','engine.exe','ctgo2.exe','CoreMasters.exe','ModernWarfare.exe','BlackOps4.exe','BlackOpsColdWar.exe','crossfire.exe','Crookz.exe','CW.EXE','TygemBaduk.exe','InphaseNXD.exe','Tropico5.exe','Tropico6-Win64-Shipping.exe','Client_tos.exe','  Client_tos_x64.exe','PointBlank.exe','FortniteClient-Win64-Shipping.exe','FortressV2.exe','Furi.exe','HitGame.exe','FSeFootball.exe','pmangPoker.exe','pmangvegas.exe','PMANGSLOTS.exe','fifazf.exe','PillarsOfEternity.exe','Hearthstone.exe','HoundsApp.exe','HyperUniverse.exe','duelgo.exe','Hanjanggi.exe','Hand of Fate 2.exe','Hover.exe','Holic2.exe   ','Among US.exe','r5apex.exe','borealblade_64bit.exe','Cities.exe','CookingSim.exe','disco.exe','DyingLightGame.exe','Eco.exe','fifa4zf.exe','Forge and Fight.exe','FuryUnleashed.exe','hl2.exe','GasGuzzlers.exe','GTFO.exe','HelloNeighbor-Win64-Shipping.exe','HouseFlipper.exe','HuntGame.exe','Injustice2.exe','INSIDE.exe','Game-Win64-Shipping.exe','KingdomCome.exe','left4dead2.exe','Mordhau-Win64-Shipping.exe','LF-Win64-Shipping.exe','Phasmophobia.exe','hl2.exe','SpaceAssault-Win64-Shipping.exe','RimWorldWin64.exe','Shieldwall-Win64-Shipping.exe','Sky Force Reloaded.exe','Stardew Valley.exe','SH.exe','SuperliminalSteam.exe','Terraria.exe','TheForest.exe','witcher3.exe','TheyAreBillions.exe','thief.exe','Thrones.exe','Trailmakers.exe','trine4.exe','UltimateZombieDefense_64.exe','UnrailedGame.exe','YAZD_HD.exe']
                 #
                 # 중복하는가?
-                #print('runing')
+                # print('runing')
                 isrunning = list(set(my_list).intersection(block_Process_list))
                 for process in isrunning:
                     subprocess.call('taskkill /F /IM ' + process)
@@ -572,9 +742,8 @@ class thrFaceDetection(Thread):
         self.capture.set(4, 480)
         self.fc = 20.0
         self.codec = cv2.VideoWriter_fourcc(*'DIVX')  # Codec 설정
-        #self.frame = None
+        # self.frame = None
         self.prevCamStatus = False
-
 
     def set_eventobj(self, Event):
         self.event = Event
@@ -586,7 +755,7 @@ class thrFaceDetection(Thread):
         start_time = 0
         end_time = 0
         self.thread = Thread(target=self.update, args=())
-        # self.thread.daemon = True
+        self.thread.daemon = True
         self.thread.start()
         self.prevCamStatus = False
         while (self.event):
@@ -594,22 +763,27 @@ class thrFaceDetection(Thread):
                 if self.capture.isOpened():
                     (self.camOn, self.frame) = self.capture.read()
                     if self.camOn:
-                        cam_is_valid = 'CAM_ON'
+                        str_cam_is_valid = 'CAM_ON'
                     else:
-                        cam_is_valid = 'CAM_OFF'
+                        str_cam_is_valid = 'CAM_OFF'
                     user.cam_is_valid = self.camOn
 
-                    if self.prevCamStatus != self.camOn:  # 이전 상태와 현 상태가 다르다면?
+                    # 이전 상태와 현 상태가 다르다면?
+                    if self.prevCamStatus != self.camOn:
                         # DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
-                        uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
+                        uesr_search = \
+                        saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
 
-                        saveDB(f"update user_info set cam_status='{self.camOn}' where user_ip='{user.address}'")
+                        saveDB(f"update user_info set cam_status='{user.cam_is_valid}' where user_ip='{user.address}'")
 
                         msg = f"insert into state_records values(default, " \
-                              f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{cam_is_valid}','{self.camOn}','{user.User_is_on_seat}',current_timestamp)"
+                              f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{str_cam_is_valid}','{user.cam_is_valid}'," \
+                              f"'{user.User_is_on_seat}',current_timestamp)"
                         saveDB(msg)
 
                     self.prevCamStatus = self.camOn
+
+                    # 캠이 켜져 있다면?
                     if (self.camOn):
                         (h, w) = self.frame.shape[:2]
 
@@ -631,21 +805,22 @@ class thrFaceDetection(Thread):
 
                                 cv2.rectangle(self.frame, (startX, startY), (endX, endY), (255, 255, 255), 2)
 
-                        #self.frame = cv2.flip(self.frame, 1)
+                        self.frame = cv2.flip(self.frame, 1)
                         cv2.putText(self.frame, text=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
                                     org=(30, 460),
                                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                                     color=(0, 255, 0), thickness=2)
                         self.lastframe = self.frame
-                        #cv2.imshow("Frame", self.frame)
+                        # cv2.imshow("Frame", self.frame)
 
                         if len(face) == 0:
                             sleep = sleep + 1
                             if sleep == 1:
                                 videoname = time.strftime('%Y-%m-%d %Hh %Mm',
                                                           time.localtime(time.time()))
-                                out = cv2.VideoWriter(videoname + '.mp4', self.codec, self.fc, (int(self.capture.get(3)),
-                                                                                      int(self.capture.get(4))))
+                                out = cv2.VideoWriter(videoname + '.mp4', self.codec, self.fc,
+                                                      (int(self.capture.get(3)),
+                                                       int(self.capture.get(4))))
                                 print('파일 생성:', videoname + '.mp4')
                                 start_time = time.time()
                             else:
@@ -664,7 +839,8 @@ class thrFaceDetection(Thread):
                                     ngmode = 'BREAKAWAY'
                                     user.breakaway = True
 
-                                    user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
+                                    user_id = \
+                                        saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
                                     msg = f"insert into ng_records values(default, " \
                                           f"'{user_id}','{ngmode}', current_timestamp,'{videoname + '.mp4'}')"
                                     saveDB(msg)
@@ -675,7 +851,8 @@ class thrFaceDetection(Thread):
                                     # socketClient.send_file(videoname+'.mp4')
                                     # classroom_id/user_id/.mp4
                                     userinfo = \
-                                    saveDB(f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[0]
+                                        saveDB(f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[0]
+
                                     filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname + '.mp4'
                                     # global socketClient
                                     # socketClient.send_file(videoname+'.mp4')
@@ -689,39 +866,53 @@ class thrFaceDetection(Thread):
 
         self.capture.release()
         cv2.destroyAllWindows()
+
     def update(self):
         # Display frames in main program
-        #frame = imutils.resize(self.frame, width=400)
-        #self.frame =
+        # frame = imutils.resize(self.frame, width=400)
+        # self.frame =
         global pauseclass
         while self.event:
             try:
                 if not pauseclass:
                     cv2.imshow('Frame ', self.lastframe)
                     time.sleep(0.01)
+
                     key = cv2.waitKey(1)
-                    if key == ord('q'):
-                        pauseclass = True
+                    if key == ord('q') and pauseclass:
+                        # pauseclass = True
                         self.capture.release()
                         cv2.destroyAllWindows()
                         exit(1)
+
             except AttributeError:
                 pass
 
 
+def savecounter():
+    # DB user 등록 되어있으면
+    # 해당 user정보에 로그인 = 0 으로 저장한다.
+    userid = saveDB(f"select user_id from user_info where room_code='{user.classRoom_id}' and user_name='{user.name}'")
+    if not userid:  ## user 정보가 조회가 된다면 로그인 0
+        saveDB(
+            f"update user_info set login_status=False,cam_status='{user.cam_is_valid}',emergency_status='{user.User_is_on_seat}' "
+            f"where user_id='{userid[0][0]}'")
+    # exit_program()
+
+
+def exit_program():
+    savecounter()
+    sftp.close()
+    ssh.close()
+    sys.exit()
+
 
 if __name__ == "__main__":
-
-    host = '13.124.19.47'
-    username = 'ec2-user'
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(host, username=username, key_filename='jusu.pem')
-    sftp = ssh.open_sftp()
-
+    atexit.register(savecounter)  # 프로그램 종료 시 이벤트 발생
     app = QApplication(sys.argv)
     myWindow = MyWindow()
     myWindow.show()
     app.exec_()
+    savecounter()
     sftp.close()
     ssh.close()
