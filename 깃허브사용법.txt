@@ -1,0 +1,25 @@
+
+
+
+새로 다운 받는 법 
+
+1. 새폴더 생성 
+2. 새폴더 안에서 Git Bash Here 클릭 
+3. git init
+4. git remote add origin https://github.com/theodore-choi/2021-1-ISECD-Team10.git
+5. git config --global user.email "you@example.com"
+
+이미 위에 해당 세팅이 완료되어 있다면 , 스킵가능(1~5단계)
+6. git pull origin master
+폴더에 파일들이 내려받아 졌는지 확인
+ 
+# 내려받은 파일을 수정 한 후 업로드해야 하는 경우 (내가 코딩한 내용을 깃허브에 업로드해야 할 때)
+# 업로드 방법
+
+1. GitBash 창을 열고
+2. git status
+3. git add .
+4. git commit -m "주석 달 내용"
+5. git push origin +master
+(혹시 로그인 창이 뜨면 로그인 할 것)
+

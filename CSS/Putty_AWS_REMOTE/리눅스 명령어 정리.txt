@@ -1,0 +1,27 @@
+1. 특정 폴더 경로 진입 하기
+cd 
+2. 현재 폴더 내 파일 리스트 보기
+ls 
+
+4. Python 파일 실행하기 
+python3 server.py
+
+5. 실행중인 파이썬 화면에서 나오기 
+ctrl+z
+
+6. 실행중인 프로세스 목록 보기 
+ps
+
+7. 파이썬3 프로세스 정보 읽어오기
+ps -ef | grep python3
+8. 불러들인 파이썬 3 종료하기 
+kill -9 32010
+
+9. PostgreSQL DB 접속하기 
+sudo -u postgres psql
+
+10. 패키지 설치하기 
+sudo yum 패키지명
+yum list // 전체 설치 된 패키지 리스트를 보여줌
+
+
