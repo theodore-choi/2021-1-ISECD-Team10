@@ -34,13 +34,13 @@
     <string>Student List</string>
    </property>
   </widget>
-  <widget class="QListView" name="student_list">
+  <widget class="QListWidget" name="student_list">
    <property name="geometry">
     <rect>
-     <x>10</x>
-     <y>40</y>
-     <width>301</width>
-     <height>521</height>
+     <x>20</x>
+     <y>50</y>
+     <width>281</width>
+     <height>481</height>
     </rect>
    </property>
   </widget>
