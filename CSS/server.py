@@ -36,7 +36,8 @@ class UserManager:
             for conn, addr, username in value:
                 if addr[0] == userip and conn == connector:
                     del self.users[key][i]
-                    self.users[key][0][0].send(('remove/'+username).encode()) #교수에게만 메세지 보내기 최초 사용자 등록은 교수가 먼저기 때문에 0번임
+                    if self.users[key].size(): # 아직 남았다면 !
+                        self.users[key][0][0].send(('remove/'+username).encode()) #교수에게만 메세지 보내기 최초 사용자 등록은 교수가 먼저기 때문에 0번임
                     breaker = True
                     break
                 i = i + 1

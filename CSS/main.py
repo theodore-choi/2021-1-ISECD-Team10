@@ -21,6 +21,9 @@ import paramiko, stat
 FORMAT = 'utf-8'
 # temp data
 
+protoPath = "face_detector/deploy.prototxt"
+modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 PR_guestlist =None
 pauseclass = False
 socketClient = False
@@ -557,140 +560,158 @@ class thrProcessKill(threading.Thread):
                     subprocess.call('taskkill /F /IM ' + process, creationflags=CREATE_NO_WINDOW)
                 continue
 
+
 class thrFaceDetection(Thread):
     event = None
-    def __init__(self):
+
+    def __init__(self, detector):
         super(thrFaceDetection, self).__init__()
-        self.protoPath = "face_detector/deploy.prototxt"
-        self.modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-        self.detector = cv2.dnn.readNetFromCaffe(self.protoPath, self.modelPath)
+        self.detector = detector
+        self.capture = cv2.VideoCapture(0)
+        self.capture.set(3, 640)  # 윈도우 크기
+        self.capture.set(4, 480)
+        self.fc = 20.0
+        self.codec = cv2.VideoWriter_fourcc(*'DIVX')  # Codec 설정
+        #self.frame = None
+        self.prevCamStatus = False
+
 
     def set_eventobj(self, Event):
         self.event = Event
 
     def run(self):
-        #if self.event == None:
-        #    return
-        #global paused
-
-        cap = cv2.VideoCapture(0)
-        cap.set(3, 640)  # 윈도우 크기
-        cap.set(4, 480)
-        fc = 20.0
-        codec = cv2.VideoWriter_fourcc(*'DIVX')  # Codec 설정
-
+        # Read the next frame from the stream in a different thread
+        global pauseclass
         sleep = 0
         start_time = 0
         end_time = 0
-
-        time.sleep(2.0)
-        global pauseclass
-        prevCamStatus = False
+        self.thread = Thread(target=self.update, args=())
+        # self.thread.daemon = True
+        self.thread.start()
+        self.prevCamStatus = False
         while (self.event):
             if not pauseclass:
-                self.camOn, frame = cap.read()
-                if self.camOn:
-                    cam_is_valid = 'CAM_ON'
-                else:
-                    cam_is_valid = 'CAM_OFF'
-                user.cam_is_valid = self.camOn
-                if prevCamStatus != self.camOn: # 이전 상태와 현 상태가 다르다면?
-                    #DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
-                    uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
-
-                    saveDB(f"update user_info set cam_status='{self.camOn}' where user_ip='{user.address}'")
-
-                    msg = f"insert into state_records values(default, " \
-                          f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{cam_is_valid}','{self.camOn}','{user.User_is_on_seat}',current_timestamp)"
-                    saveDB(msg)
-
-                prevCamStatus = self.camOn
-                if (self.camOn):
-                    (h, w) = frame.shape[:2]
-
-                    imageBlob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300),
-                                                      (104.0, 177.0, 123.0), swapRB=False, crop=False)
-
-                    self.detector.setInput(imageBlob)
-                    detections = self.detector.forward()
-
-                    face = []
-                    for i in range(0, detections.shape[2]):
-                        confidence = detections[0, 0, i, 2]
-
-                        if confidence > 0.5:
-                            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                            (startX, startY, endX, endY) = box.astype("int")
-
-                            face = frame[startY:endY, startX:endX]
-
-                            #cv2.rectangle(frame, (startX, startY), (endX, endY), (255, 255, 255), 2)
-
-                    #frame = cv2.flip(frame, 1)
-                    #cv2.putText(frame, text=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                    #            org=(30, 460),
-                    #            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
-                    #           color=(0, 255, 0), thickness=2)
-
-                    #cv2.imshow("Frame", frame)
-
-                    if len(face) == 0:
-                        sleep = sleep + 1
-                        if sleep == 1:
-                            videoname = time.strftime('%Y-%m-%d %Hh %Mm',
-                                                      time.localtime(time.time()))
-                            out = cv2.VideoWriter(videoname + '.mp4', codec, fc, (int(cap.get(3)),
-                                                                                  int(cap.get(4))))
-                            print('파일 생성:', videoname + '.mp4')
-                            start_time = time.time()
-                        else:
-                            out.write(frame)
+                if self.capture.isOpened():
+                    (self.camOn, self.frame) = self.capture.read()
+                    if self.camOn:
+                        cam_is_valid = 'CAM_ON'
                     else:
-                        if sleep >= 1:
-                            sleep = 0
-                            end_time = time.time()
-                            checked_time = end_time - start_time
-                            out.release()
-                            if checked_time < 30:
-                                print("ok")
-                                os.remove(videoname + '.mp4')
+                        cam_is_valid = 'CAM_OFF'
+                    user.cam_is_valid = self.camOn
+
+                    if self.prevCamStatus != self.camOn:  # 이전 상태와 현 상태가 다르다면?
+                        # DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
+                        uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
+
+                        saveDB(f"update user_info set cam_status='{self.camOn}' where user_ip='{user.address}'")
+
+                        msg = f"insert into state_records values(default, " \
+                              f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{cam_is_valid}','{self.camOn}','{user.User_is_on_seat}',current_timestamp)"
+                        saveDB(msg)
+
+                    self.prevCamStatus = self.camOn
+                    if (self.camOn):
+                        (h, w) = self.frame.shape[:2]
+
+                        imageBlob = cv2.dnn.blobFromImage(cv2.resize(self.frame, (300, 300)), 1.0, (300, 300),
+                                                          (104.0, 177.0, 123.0), swapRB=False, crop=False)
+
+                        self.detector.setInput(imageBlob)
+                        detections = self.detector.forward()
+
+                        face = []
+                        for i in range(0, detections.shape[2]):
+                            confidence = detections[0, 0, i, 2]
+
+                            if confidence > 0.5:
+                                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                                (startX, startY, endX, endY) = box.astype("int")
+
+                                face = self.frame[startY:endY, startX:endX]
+
+                                cv2.rectangle(self.frame, (startX, startY), (endX, endY), (255, 255, 255), 2)
+
+                        #self.frame = cv2.flip(self.frame, 1)
+                        cv2.putText(self.frame, text=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
+                                    org=(30, 460),
+                                    fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
+                                    color=(0, 255, 0), thickness=2)
+                        self.lastframe = self.frame
+                        #cv2.imshow("Frame", self.frame)
+
+                        if len(face) == 0:
+                            sleep = sleep + 1
+                            if sleep == 1:
+                                videoname = time.strftime('%Y-%m-%d %Hh %Mm',
+                                                          time.localtime(time.time()))
+                                out = cv2.VideoWriter(videoname + '.mp4', self.codec, self.fc, (int(self.capture.get(3)),
+                                                                                      int(self.capture.get(4))))
+                                print('파일 생성:', videoname + '.mp4')
+                                start_time = time.time()
                             else:
-                                # 자리이탈 인식 했으니 DB에 정보 insert 및 소켓통신으로 서버에 파일 저장
-                                ngmode='BREAKAWAY'
-                                user.breakaway = True
-                                user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
-                                msg = f"insert into ng_records values(default, " \
-                                      f"'{user_id}','{ngmode}', current_timestamp,'{videoname+'.mp4'}')"
-                                saveDB(msg)
-                                print(checked_time)
-                                print('졸음이 인식 됨')
-                                #소켓통신으로 서버에 파일 저장
+                                out.write(self.frame)
+                        else:
+                            if sleep >= 1:
+                                sleep = 0
+                                end_time = time.time()
+                                checked_time = end_time - start_time
+                                out.release()
+                                if checked_time < 30:
+                                    print("ok")
+                                    os.remove(videoname + '.mp4')
+                                else:
+                                    # 자리이탈 인식 했으니 DB에 정보 insert 및 소켓통신으로 서버에 파일 저장
+                                    ngmode = 'BREAKAWAY'
+                                    user.breakaway = True
 
-                                #socketClient.send_file(videoname+'.mp4')
-                                # classroom_id/user_id/.mp4
-                                userinfo = saveDB(f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[0]
-                                filepath = str(userinfo[0])+'/'+str(userinfo[1])+'/'+ videoname+'.mp4'
-                                #global socketClient
-                                #socketClient.send_file(videoname+'.mp4')
-                                CreateRawFile('file',filepath)
+                                    user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
+                                    msg = f"insert into ng_records values(default, " \
+                                          f"'{user_id}','{ngmode}', current_timestamp,'{videoname + '.mp4'}')"
+                                    saveDB(msg)
+                                    print(checked_time)
+                                    print('졸음이 인식 됨')
+                                    # 소켓통신으로 서버에 파일 저장
 
-                    '''
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'):
+                                    # socketClient.send_file(videoname+'.mp4')
+                                    # classroom_id/user_id/.mp4
+                                    userinfo = \
+                                    saveDB(f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[0]
+                                    filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname + '.mp4'
+                                    # global socketClient
+                                    # socketClient.send_file(videoname+'.mp4')
+                                    CreateRawFile('file', filepath)
+
+                    else:
+                        CSS_CAM_POPUP(self)
+                        print('Please turn off other camera program!')
                         break
-                    elif key == ord('s'):
-                        cv2.imwrite(time.strftime('%Y%m%d%H%M%S') + '.png', frame)
-                    '''
-                else:
-                    CSS_CAM_POPUP(self)
-                    print('Please turn off other camera program!')
-                    break
+                time.sleep(.01)
 
-        cap.release()
+        self.capture.release()
+        cv2.destroyAllWindows()
+    def update(self):
+        # Display frames in main program
+        #frame = imutils.resize(self.frame, width=400)
+        #self.frame =
+        global pauseclass
+        while self.event:
+            try:
+                if not pauseclass:
+                    cv2.imshow('Frame ', self.lastframe)
+                    time.sleep(0.01)
+                    key = cv2.waitKey(1)
+                    if key == ord('q'):
+                        pauseclass = True
+                        self.capture.release()
+                        cv2.destroyAllWindows()
+                        exit(1)
+            except AttributeError:
+                pass
 
 
 
 if __name__ == "__main__":
+
     host = '13.124.19.47'
     username = 'ec2-user'
     ssh = paramiko.SSHClient()
