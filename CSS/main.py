@@ -458,12 +458,14 @@ class ST_PAGE(QDialog):
             pauseclass = True  # 얼굴인식,프로세스 킬 일시 중지.
             # self.process.set_eventobj(None) # thread 종료
 
-
+'''
 class CSS_CAM_POPUP(QDialog):
-    def __init__(self, parent):
-        super(CSS_CAM_POPUP, self).__init__(parent)
+    def __init__(self):
+        #super(CSS_CAM_POPUP, self).__init__(parent)
+        super().__init__()
         css_popup_ui = 'CSS_CAM_POPUP.ui'
         uic.loadUi(css_popup_ui, self)
+        self.setModal(True)
         self.show()
 
     def closeEvent(self, QCloseEvent):
@@ -475,7 +477,7 @@ class CSS_CAM_POPUP(QDialog):
             # exit_program()
         else:
             QCloseEvent.ignore()
-
+'''
 
 class PR_GUEST_LIST(QDialog):
     def __init__(self, parent):
@@ -568,6 +570,7 @@ class thrClient(Thread):
                         for x in range(PR_guestlist.student_list.count()):  ## logout
                             if msg == PR_guestlist.student_list.item(x).text():
                                 PR_guestlist.student_list.takeItem(x)
+                                del student_login_list[x]
                                 break
                         # find = PR_guestlist.student_list.findItems(QtCore.QString(msg))
                         # PR_guestlist.student_list.removeItemWidget(find)
@@ -859,9 +862,51 @@ class thrFaceDetection(Thread):
                                     CreateRawFile('file', filepath)
 
                     else:
-                        CSS_CAM_POPUP(self)
+                        user.cam_is_valid = False
+                        str_cam_is_valid = 'CAM_OFF'
+
+                        uesr_search = \
+                            saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
+
+                        saveDB(f"update user_info set cam_status='{user.cam_is_valid}' where user_ip='{user.address}'")
+
+                        msg = f"insert into state_records values(default, " \
+                              f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{str_cam_is_valid}','{user.cam_is_valid}'," \
+                              f"'{user.User_is_on_seat}',current_timestamp)"
+                        saveDB(msg)
+
+                        msgBox = QMessageBox()
+                        msgBox.setWindowTitle("카메라 확인 필요")  # 메세지창의 상단 제목
+                        msgBox.setIcon(QMessageBox.Information)  # 메세지창 내부에 표시될 아이콘
+                        msgBox.setText("카메라 확인 요청 메세지")  # 메세지 제목
+
+                        msgBox.setInformativeText("카메라가 다른 앱에서 사용중이거나 연결되어있지 않습니다.\n 수업태도 분석을 위해 다른 앱에서 카메라를 꺼주십시오.")  # 메세지 내용
+
+                        msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)  # 메세지창의 버튼
+
+                        msgBox.setDefaultButton(QMessageBox.Yes)  # 포커스가 지정된 기본 버튼
+
+                        msgBox.exec_()  # 클릭한 버튼 결과 리턴
+
+                        #if re == QMessageBox.Yes:
+                            #
+                            # exit_program()
+                        #else:
+                            #
+
                         print('Please turn off other camera program!')
                         break
+                else:
+                    msgBox = QMessageBox()
+                    msgBox.setWindowTitle("카메라 연결 확인")  # 메세지창의 상단 제목
+                    msgBox.setIcon(QMessageBox.Information)  # 메세지창 내부에 표시될 아이콘
+                    msgBox.setText("카메라 연결 요청 메세지")  # 메세지 제목
+                    msgBox.setInformativeText(
+                        "카메라가 연결되어있지 않습니다. 카메라를 설치해주세요.\n ")  # 메세지 내용
+                    msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)  # 메세지창의 버튼
+                    msgBox.setDefaultButton(QMessageBox.Yes)  # 포커스가 지정된 기본 버튼
+                    msgBox.exec_()  # 클릭한 버튼 결과 리턴
+
                 time.sleep(.01)
 
         self.capture.release()
@@ -892,7 +937,7 @@ class thrFaceDetection(Thread):
 def savecounter():
     # DB user 등록 되어있으면
     # 해당 user정보에 로그인 = 0 으로 저장한다.
-    userid = saveDB(f"select user_id from user_info where room_code='{user.classRoom_id}' and user_name='{user.name}'")
+    userid = saveDB(f"select user_id from user_info where classroom_id=(select classroom_id from room_info where room_code='{user.classRoom_id}') and user_name='{user.name}'")
     if not userid:  ## user 정보가 조회가 된다면 로그인 0
         saveDB(
             f"update user_info set login_status=False,cam_status='{user.cam_is_valid}',emergency_status='{user.User_is_on_seat}' "
