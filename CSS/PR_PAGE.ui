@@ -118,7 +118,7 @@
     </font>
    </property>
    <property name="text">
-    <string>Presenter Page</string>
+    <string>발표자 관리 창</string>
    </property>
   </widget>
  </widget>

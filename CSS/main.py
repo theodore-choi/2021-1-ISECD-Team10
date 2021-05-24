@@ -69,6 +69,7 @@ PR_guestlist = None
 pauseclass = False
 socketClient = False
 app = None
+C_S = None
 
 student_login_list = []
 
@@ -179,7 +180,7 @@ class PR_LOGIN(QDialog):
                         QMessageBox.about(self, "Warning", "이미 등록된 사용자가 있습니다")
                         break
         if not islicense:
-            QMessageBox.about(self, "Warning", "Serial key is not matching, Please retry")
+            QMessageBox.about(self, "Warning", "Serial key 가 맞지 않습니다, 다시 시도 하십시오")
 
     def closeEvent(self, QCloseEvent):
         re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
@@ -241,7 +242,7 @@ class ST_LOGIN(QDialog):
                     isnoRoom = False
                     break
         if isnoRoom:
-            QMessageBox.about(self, "Warning", "Room Code is not valid, Please retry")
+            QMessageBox.about(self, "Warning", "Room Code 가 유효하지 않습니다, 다시 시도 하십시오")
 
     def closeEvent(self, QCloseEvent):
         re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
@@ -352,7 +353,8 @@ class PR_PAGE(QDialog):
     def onSelected(self):
         selected = self.Class_Status.currentText()
         # 수업시 학생이 한명이상이어야 한다.
-        if not selected == '':
+
+        if not selected == '' and len(student_login_list) >= 1:
             user.classOrder = selected
             msg = selected + ',' + user.classRoom_id
             socketClient.send(msg)
@@ -369,6 +371,8 @@ class ST_PAGE(QDialog):
         st_page_ui = 'ST_PAGE.ui'
         uic.loadUi(st_page_ui, self)
         self.Class_Status.currentIndexChanged.connect(self.onSelected)
+        global C_S
+        C_S = self.C_S
 
         # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
         # clinet는 DB와 연결 한다
@@ -531,7 +535,10 @@ class thrClient(Thread):
                     print(msg)
 
                     global pauseclass
+                    global C_S
                     if msg == '수업시작':
+                        C_S.setText("수업중")
+                        C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         event = threading.Event()
                         event.clear()
@@ -546,12 +553,18 @@ class thrClient(Thread):
                         process.daemon = True
                         process.start()
                     if msg == '쉬는시간':
+                        C_S.setText("쉬는시간")
+                        C_S.setStyleSheet("Color : yellow")
                         user.classOrder = msg
                         pauseclass = True
                     if msg == '수업재개':
+                        C_S.setText("수업중")
+                        C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         pauseclass = False
                     if msg == '수업종료':
+                        C_S.setText("수업종료")
+                        C_S.setStyleSheet("Color : red")
                         user.classOrder = msg
                         process.set_eventobj(None)
                         facedetector.set_eventobj(None)
@@ -920,7 +933,7 @@ class thrFaceDetection(Thread):
         while self.event:
             try:
                 if not pauseclass:
-                    cv2.imshow('Frame ', self.lastframe)
+                    cv2.imshow('발표용', self.lastframe)
                     time.sleep(0.01)
 
                     key = cv2.waitKey(1)
