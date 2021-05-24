@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import *
 from PyQt5 import uic
 import random, itertools, threading, os, socket, cv2, time, sys, paramiko, stat, psutil, subprocess, atexit
@@ -98,6 +98,7 @@ class MyWindow(QMainWindow, form_class):
         super().__init__()
         self.setupUi(self)
 
+        self.setWindowIcon(QIcon('icon/online-course-icon-57.png'))
         self.Presenter_button.clicked.connect(self.btn_clicked)
         self.Student_button.clicked.connect(self.btn_st_clicked)
 
@@ -316,7 +317,7 @@ class PR_PAGE(QDialog):
                 self.lineEdit_room.setText(roomnumber)
             else:
                 user.classRoom_id = roomnumber = \
-                saveDB(f"select room_code from room_info where licencekey = '{user.license_number}'")[0][0]
+                    saveDB(f"select room_code from room_info where licencekey = '{user.license_number}'")[0][0]
                 self.lineEdit_room.setText(roomnumber)
 
         forignkey = saveDB(f"select classroom_id from room_info where licencekey='{user.license_number}'")[0][0]
@@ -462,6 +463,7 @@ class ST_PAGE(QDialog):
             pauseclass = True  # 얼굴인식,프로세스 킬 일시 중지.
             # self.process.set_eventobj(None) # thread 종료
 
+
 '''
 class CSS_CAM_POPUP(QDialog):
     def __init__(self):
@@ -482,6 +484,7 @@ class CSS_CAM_POPUP(QDialog):
         else:
             QCloseEvent.ignore()
 '''
+
 
 class PR_GUEST_LIST(QDialog):
     def __init__(self, parent):
@@ -538,6 +541,10 @@ class thrClient(Thread):
                     global C_S
                     if msg == '수업시작':
                         C_S.setText("수업중")
+                        font1 = C_S.font()
+                        font1.setPointSize(12)
+                        font1.setBold(True)
+                        C_S.setFont(font1)
                         C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         event = threading.Event()
@@ -554,16 +561,27 @@ class thrClient(Thread):
                         process.start()
                     if msg == '쉬는시간':
                         C_S.setText("쉬는시간")
+                        font1 = C_S.font()
+                        font1.setPointSize(12)
+                        font1.setBold(True)
+                        C_S.setFont(font1)
                         C_S.setStyleSheet("Color : yellow")
                         user.classOrder = msg
                         pauseclass = True
                     if msg == '수업재개':
                         C_S.setText("수업중")
+                        font1 = C_S.font()
+                        font1.setPointSize(12)
+                        font1.setBold(True)
+                        C_S.setFont(font1)
                         C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         pauseclass = False
                     if msg == '수업종료':
                         C_S.setText("수업종료")
+                        C_S.setPointSize(12)
+                        font2 = C_S.font()
+                        font2.setBold(True)
                         C_S.setStyleSheet("Color : red")
                         user.classOrder = msg
                         process.set_eventobj(None)
@@ -788,7 +806,7 @@ class thrFaceDetection(Thread):
                     if self.prevCamStatus != self.camOn:
                         # DB에 상태 변환됬다구 저장. 유저 인포에도 저장.
                         uesr_search = \
-                        saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
+                            saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
 
                         saveDB(f"update user_info set cam_status='{user.cam_is_valid}' where user_ip='{user.address}'")
 
@@ -867,7 +885,9 @@ class thrFaceDetection(Thread):
                                     # socketClient.send_file(videoname+'.mp4')
                                     # classroom_id/user_id/.mp4
                                     userinfo = \
-                                        saveDB(f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[0]
+                                        saveDB(
+                                            f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[
+                                            0]
 
                                     filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname + '.mp4'
                                     # global socketClient
@@ -893,7 +913,8 @@ class thrFaceDetection(Thread):
                         msgBox.setIcon(QMessageBox.Information)  # 메세지창 내부에 표시될 아이콘
                         msgBox.setText("카메라 확인 요청 메세지")  # 메세지 제목
 
-                        msgBox.setInformativeText("카메라가 다른 앱에서 사용중이거나 연결되어있지 않습니다.\n 수업태도 분석을 위해 다른 앱에서 카메라를 꺼주십시오.")  # 메세지 내용
+                        msgBox.setInformativeText(
+                            "카메라가 다른 앱에서 사용중이거나 연결되어있지 않습니다.\n 수업태도 분석을 위해 다른 앱에서 카메라를 꺼주십시오.")  # 메세지 내용
 
                         msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)  # 메세지창의 버튼
 
@@ -901,11 +922,11 @@ class thrFaceDetection(Thread):
 
                         msgBox.exec_()  # 클릭한 버튼 결과 리턴
 
-                        #if re == QMessageBox.Yes:
-                            #
-                            # exit_program()
-                        #else:
-                            #
+                        # if re == QMessageBox.Yes:
+                        #
+                        # exit_program()
+                        # else:
+                        #
 
                         print('Please turn off other camera program!')
                         break
@@ -919,11 +940,12 @@ class thrFaceDetection(Thread):
                     msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)  # 메세지창의 버튼
                     msgBox.setDefaultButton(QMessageBox.Yes)  # 포커스가 지정된 기본 버튼
                     msgBox.exec_()  # 클릭한 버튼 결과 리턴
+                    break
 
-                time.sleep(.01)
+                # time.sleep(.01)
 
         self.capture.release()
-        cv2.destroyAllWindows()
+        # cv2.destroyAllWindows()
 
     def update(self):
         # Display frames in main program
@@ -933,7 +955,7 @@ class thrFaceDetection(Thread):
         while self.event:
             try:
                 if not pauseclass:
-                    cv2.imshow('발표용', self.lastframe)
+                    cv2.imshow('For presenting', self.lastframe)
                     time.sleep(0.01)
 
                     key = cv2.waitKey(1)
@@ -950,8 +972,9 @@ class thrFaceDetection(Thread):
 def savecounter():
     # DB user 등록 되어있으면
     # 해당 user정보에 로그인 = 0 으로 저장한다.
-    userid = saveDB(f"select user_id from user_info where classroom_id=(select classroom_id from room_info where room_code='{user.classRoom_id}') and user_name='{user.name}'")
-    if not userid:  ## user 정보가 조회가 된다면 로그인 0
+    userid = saveDB(
+        f"select user_id from user_info where user_name='{user.name}' and classroom_id=(select classroom_id from room_info where room_code='{user.classRoom_id}')")
+    if len(userid) > 0:  ## user 정보가 조회가 된다면 로그인 0
         saveDB(
             f"update user_info set login_status=False,cam_status='{user.cam_is_valid}',emergency_status='{user.User_is_on_seat}' "
             f"where user_id='{userid[0][0]}'")
@@ -967,7 +990,9 @@ def exit_program():
 
 if __name__ == "__main__":
     atexit.register(savecounter)  # 프로그램 종료 시 이벤트 발생
+
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon('icon/online-course-icon-57.png'))
     myWindow = MyWindow()
     myWindow.show()
     app.exec_()

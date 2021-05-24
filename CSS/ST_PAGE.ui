@@ -13,14 +13,73 @@
   <property name="windowTitle">
    <string>Dialog</string>
   </property>
+  <property name="styleSheet">
+   <string notr="true">background-color:rgb(230, 230, 250);
+selection-background-color: rgb(243, 243, 243);
+color: rgba(85, 0, 255, 205);</string>
+  </property>
   <widget class="QComboBox" name="Class_Status">
    <property name="geometry">
     <rect>
-     <x>155</x>
-     <y>126</y>
-     <width>87</width>
+     <x>320</x>
+     <y>70</y>
+     <width>95</width>
      <height>20</height>
     </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">QComboBox {
+    border: 1px solid gray;
+    border-radius: 3px;
+    padding: 1px 18px 1px 3px;
+    min-width: 6em;
+}
+QComboBox QAbstractItemView {
+    border: 2px solid darkgray;
+    selection-background-color: lightgray;
+}
+QComboBox:editable {
+    background: white;
+}
+
+QComboBox:!editable, QComboBox::drop-down:editable {
+     background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                 stop: 0 #E1E1E1, stop: 0.4 #DDDDDD,
+                                 stop: 0.5 #D8D8D8, stop: 1.0 #D3D3D3);
+}
+
+/* QComboBox gets the &quot;on&quot; state when the popup is open */
+QComboBox:!editable:on, QComboBox::drop-down:editable:on {
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #D3D3D3, stop: 0.4 #D8D8D8,
+                                stop: 0.5 #DDDDDD, stop: 1.0 #E1E1E1);
+}
+
+QComboBox:on { /* shift the text when the popup opens */
+    padding-top: 3px;
+    padding-left: 4px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 15px;
+
+    border-left-width: 1px;
+    border-left-color: darkgray;
+    border-left-style: solid; /* just a single line */
+    border-top-right-radius: 3px; /* same radius as the QComboBox */
+    border-bottom-right-radius: 3px;
+}
+
+QComboBox::down-arrow {
+    image: url(/usr/share/icons/crystalsvg/16x16/actions/1downarrow.png);
+}
+
+QComboBox::down-arrow:on { /* shift the arrow when popup is open */
+    top: 1px;
+    left: 1px;
+}</string>
    </property>
    <property name="currentText">
     <string notr="true">OFF</string>
@@ -59,6 +118,9 @@
      <bold>true</bold>
     </font>
    </property>
+   <property name="styleSheet">
+    <string notr="true">color: rgb(33 ,33 ,202)</string>
+   </property>
    <property name="text">
     <string>학생 상태창</string>
    </property>
@@ -66,9 +128,9 @@
   <widget class="QLabel" name="label_State">
    <property name="geometry">
     <rect>
-     <x>40</x>
-     <y>120</y>
-     <width>121</width>
+     <x>204</x>
+     <y>60</y>
+     <width>111</width>
      <height>31</height>
     </rect>
    </property>
@@ -81,20 +143,23 @@
     </font>
    </property>
    <property name="text">
-    <string>자리비움 모드</string>
+    <string>자리비움 모드:</string>
    </property>
   </widget>
   <widget class="QLabel" name="label">
    <property name="geometry">
     <rect>
      <x>30</x>
-     <y>170</y>
+     <y>110</y>
      <width>371</width>
-     <height>101</height>
+     <height>181</height>
     </rect>
    </property>
+   <property name="frameShape">
+    <enum>QFrame::Box</enum>
+   </property>
    <property name="text">
-    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;주의. &lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;자리비움 시 모드 전환을 OFF로 하지 않으면 수업성적에 &lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;불이익이 있을 수 있습니다.&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;[주의]&lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;반드시, 자리비움 시 &amp;quot;&lt;/span&gt;&lt;span style=&quot; font-size:12pt; font-weight:600; color:#0000ff;&quot;&gt;On&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;&amp;quot;으로 전환하세요.&lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;또한, 자리에 돌아올 때 &amp;quot;&lt;/span&gt;&lt;span style=&quot; font-weight:600; color:#ff007f;&quot;&gt;OFF&lt;/span&gt;&lt;span style=&quot; font-weight:600; color:#55007f;&quot;&gt;&amp;quot;&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;로 전환하세요.&lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;br/&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;너무 오래 자리를 비우게 될 경우, &lt;/span&gt;&lt;/p&gt;&lt;p align=&quot;center&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;수업 출석/태도 분석에 불이익을 얻을 수 있습니다. &lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
    </property>
   </widget>
   <widget class="QLabel" name="C_S">
@@ -107,7 +172,7 @@
     </rect>
    </property>
    <property name="frameShape">
-    <enum>QFrame::StyledPanel</enum>
+    <enum>QFrame::Box</enum>
    </property>
    <property name="text">
     <string>&lt;!DOCTYPE HTML PUBLIC &quot;-//W3C//DTD HTML 4.0//EN&quot; &quot;http://www.w3.org/TR/REC-html40/strict.dtd&quot;&gt;

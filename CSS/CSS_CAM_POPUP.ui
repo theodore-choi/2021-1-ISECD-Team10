@@ -13,6 +13,11 @@
   <property name="windowTitle">
    <string>Dialog</string>
   </property>
+  <property name="styleSheet">
+   <string notr="true">background-color:rgb(230, 230, 250);
+selection-background-color: rgb(243, 243, 243);
+color: rgba(85, 0, 255, 205);</string>
+  </property>
   <widget class="QLabel" name="label">
    <property name="geometry">
     <rect>
