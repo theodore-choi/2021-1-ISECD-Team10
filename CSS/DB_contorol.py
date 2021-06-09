@@ -1,6 +1,20 @@
 
 
 import psycopg2
+import pandas.io.sql as psql
+def getDataFrameFromPSQL(msg):
+    try:
+        connection = conn = psycopg2.connect("host=13.124.19.47 dbname=testdb user=testuser password=testuser1! port=5432")
+    except psycopg2.Error as e:
+        print('Failt to connection Error')
+        print(e)
+        if conn:
+            conn.rollback()
+    else:
+        result = psql.read_sql(msg, connection)
+        if conn:
+            conn.close()
+    return result
 def saveDB(msg):
     try:
         #conn = psycopg2.connect(host='54.180.113.136', dbname='cssdb', user='postgres', password='1234', port='5432') # db에 접속

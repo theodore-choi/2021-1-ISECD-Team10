@@ -2,14 +2,20 @@
 
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import *
-from PyQt5 import uic
-import random, itertools, threading, os, socket, cv2, time, sys, paramiko, stat, psutil, subprocess, atexit
+from PyQt5 import uic,QtWebEngineWidgets
+import random, itertools, threading, os, socket, cv2, time, sys, paramiko, stat, psutil, subprocess, atexit, math
 from requests import get
-from DB_contorol import saveDB
+from DB_contorol import saveDB, getDataFrameFromPSQL
 from threading import Thread
 from os.path import exists
 import numpy as np
-
+from PandasModel import PandasModel
+import plotly.express as px
+import datetime
+import pandas as pd
+import dlib
+from keras.models import load_model
+from imutils import face_utils
 '''
 /***************************************************************/
             user( 사용자 정보를 다루는 클래스 전역 선언 )
@@ -61,15 +67,35 @@ ssh.connect(host, username=username, key_filename='jusu.pem')
 sftp = None
 sftp = ssh.open_sftp()
 
+# 눈 크롭 프레임 사이즈 조정용
+IMG_SIZE = (34, 26)
 protoPath = "face_detector/deploy.prototxt"
 modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
 detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
+# 얼굴 랜드마크 & 눈인식 모델 설정
+predictor = dlib.shape_predictor('models/shape_predictor_68_face_landmarks.dat')
+model = load_model('models/2018_12_17_22_58_35.h5')
+model.summary()
+eye_img_l = np.zeros(IMG_SIZE)
+eye_input_l = eye_img_l.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+model.predict(eye_input_l)
 PR_guestlist = None
 pauseclass = False
 socketClient = False
 app = None
 C_S = None
+
+# 변수 초기설정
+
+no_face = 0
+no_eye = 0
+start_time_f = 0
+start_time_e = 0
+sec_c = 0
+close = 0
+eye_cycle = 0
+recording_eye = 0
 
 student_login_list = []
 
@@ -97,7 +123,7 @@ class MyWindow(QMainWindow, form_class):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-
+        #DialogDataVisualization(self)
         self.setWindowIcon(QIcon('icon/online-course-icon-57.png'))
         self.Presenter_button.clicked.connect(self.btn_clicked)
         self.Student_button.clicked.connect(self.btn_st_clicked)
@@ -255,6 +281,146 @@ class ST_LOGIN(QDialog):
         else:
             QCloseEvent.ignore()
 
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
+class DialogDataVisualization(QDialog):
+    def __init__(self, parent):
+        super(DialogDataVisualization, self).__init__(parent)
+        pr_login_ui = 'DialogDataVisualization.ui'
+        uic.loadUi(pr_login_ui, self)
+        self.browser = QtWebEngineWidgets.QWebEngineView(self)
+        self.verticalLayout_3.addWidget(self.browser)
+        classid = 1  # temp data
+
+        dataframe1 = getDataFrameFromPSQL(f"select * from order_records where classroom_id='{classid}'")
+        dataframe2 = getDataFrameFromPSQL(f"select * from state_records where classroom_id='{classid}'")
+        dataframe3 = getDataFrameFromPSQL(f"select * from ng_records where classroom_id='{classid}'")
+
+        Start = dataframe1.loc[dataframe1['order_status'] == 'START']['order_time']
+        ts = pd.to_datetime(str(Start.values[0]))
+        StartTime = ts.strftime('%y-%m-%d %I:%M:%S')
+        End = dataframe1.loc[dataframe1['order_status'] == 'EXIT']['order_time']
+        ts = pd.to_datetime(str(End.values[0]))
+        EndTime = ts.strftime('%y-%m-%d %I:%M:%S')
+        REST = dataframe1.loc[dataframe1['order_status'] == 'REST']['order_time']
+        ts = pd.to_datetime(str(REST.values[0]))
+        REST = ts.strftime('%y-%m-%d %I:%M:%S')
+        RESTART = dataframe1.loc[dataframe1['order_status'] == 'RESTART']['order_time']
+        ts = pd.to_datetime(str(RESTART.values[0]))
+        RESTART = ts.strftime('%y-%m-%d %I:%M:%S')
+
+        self.textBrowser.append(f"수업 시작 시간: {StartTime} ~ 수업 종료 시간: {EndTime}")
+        self.textBrowser.append(f"수업 쉬는 시간: {REST} ~ {RESTART}")
+
+
+        da = dataframe1.loc[:, ['order_status', 'order_time']]
+        da.columns = ['mode', 'time']
+        db = dataframe2.loc[:, ['event_id', 'applied_time']]
+        db.columns = ['mode', 'time']
+        dc = dataframe3.loc[:, ['ng_mode', 'ng_time_start']]
+        dc.columns = ['mode', 'time']
+        df = pd.concat([da, db, dc], ignore_index=True)
+        # df = df.set_index('time')
+        df = df.sort_values('time')
+        #df.info()
+        df['time1'] = df['time'].apply(
+            lambda dt: datetime.datetime(dt.year, dt.month, dt.day, dt.hour, 10 * (dt.minute // 10)))
+
+        xticklabels = [x.strftime('%H:%M') for x in df['time1']]
+        #print(xticklabels)
+        df['time2'] = xticklabels
+
+        df_group = df.groupby(by=["time2", 'mode']).size().reset_index(name="counts")
+        #fig = go.Figure()
+        ts = pd.Timedelta(End.values[0] - Start.values[0]).seconds
+
+        db = dataframe2.loc[:, ['user_name', 'event_id', 'applied_time']]
+        # db.columns = ['name','mode','time']
+        dc = dataframe3.loc[:, ['user_name', 'ng_mode', 'ng_time_start', 'ng_time_end', 'ng_mp4']]
+        # dc.columns = ['name','mode','time']
+        df_temp = pd.concat([db, dc], ignore_index=True)
+        df_temp['ng_time'] = df_temp['ng_time_end'] - df_temp['ng_time_start']
+        df_temp = df_temp.groupby(by=['user_name'])
+        self.df_temp = df_temp
+        lis_pd = []
+        for name, df in df_temp: # 사용자별 테이블 생성
+            BadTotaltime = df['ng_time'].sum()
+            print(BadTotaltime)
+            # print(df['ng_mode'].size)
+            score = ((ts - BadTotaltime.seconds) / ts) * 100
+            print(score)
+            # print(df['ng_mode'].value_counts().sum())
+            total_count = df['ng_mode'].value_counts().sum()
+
+            sleeping = len(df[df['ng_mode'] == 'SLEEP'])  # df['ng_mode'].value_counts()
+            moveout = len(df[df['ng_mode'] == 'BREAKAWAY'])
+            lis_pd.append([name, score, BadTotaltime, total_count, sleeping, moveout ])
+
+        self.dataframe = pd.DataFrame(lis_pd, columns=['이름','수업태도점수','누적 시간', '총 인식횟수','졸음인식횟수','자리이탈인식횟수'])
+
+        fig = px.bar(data_frame=df_group, x="time2", y="counts", color='mode', barmode="group")
+        fig.layout = dict(title='10분 사이 분석 결과 확인',
+                          xaxis=dict(type="category",
+                                     categoryorder='category ascending'))
+        fig.update_xaxes(nticks=10)
+
+        # x축 type을 카테고리 형으로 설정, 순서를 오름차순으로 날짜순서가 되도록 설정
+
+
+        fig.update_layout(height=500, width=700,
+                          title_text="수업시간 (10분 간격) 동안 수업태도 분석 결과", barmode='group')
+
+        self.browser.setHtml(fig.to_html(include_plotlyjs='cdn'))
+
+        # right layout
+        self.tableWidget = QTableView()
+        self.tableWidget.setSortingEnabled(True)
+       #self.tableWidget.setSelectionMode(QAbstractItemView.DoubleClicked)
+        self.tableWidget.doubleClicked.connect(self.tableWidget_doubleClicked)
+
+
+        model_sales = PandasModel(self.dataframe)
+        self.tableWidget.setModel(model_sales)
+        self.verticalLayout_4.addWidget(self.tableWidget)
+
+
+        self.tableWidget_student = QTableView()
+        self.verticalLayout_5.addWidget(self.tableWidget_student)
+        # self.setLayout(layout)
+        self.show()
+
+    def tableWidget_doubleClicked(self):
+        row = self.tableWidget.currentIndex().row()
+        column = self.tableWidget.currentIndex().column()
+        print(row, column)
+        #item = tableWidget.item(row, column)
+
+        item = self.dataframe.iloc[row,0]
+        print(item)
+        self.df_sub = self.df_temp.get_group(item)
+        self.tableWidget_student.setSortingEnabled(True)
+
+        model_sales = PandasModel(self.df_sub)
+        self.tableWidget_student.setModel(model_sales)
+
+
+        return
+
+
+    def closeEvent(self, QCloseEvent):
+        re = QMessageBox.question(self, "종료 확인", "종료 하시겠습니까?",
+                                  QMessageBox.Yes | QMessageBox.No)
+
+        if re == QMessageBox.Yes:
+            QCloseEvent.accept()
+            exit_program()
+        else:
+            QCloseEvent.ignore()
+
+
+
+
 
 def CreateRawFile(type, name):  #
     remote_path = '/home/ec2-user/CSS/'
@@ -354,7 +520,8 @@ class PR_PAGE(QDialog):
     def onSelected(self):
         selected = self.Class_Status.currentText()
         # 수업시 학생이 한명이상이어야 한다.
-
+        if selected == '수업종료':
+            self.viewDataResult = DialogDataVisualization(self)
         if not selected == '' and len(student_login_list) >= 1:
             user.classOrder = selected
             msg = selected + ',' + user.classRoom_id
@@ -362,7 +529,7 @@ class PR_PAGE(QDialog):
             # dp update
             forignkey = saveDB(f"select classroom_id from room_info where room_code='{user.classRoom_id}'")[0][0]
             msg = f"insert into order_records values(default, " \
-                  f"'{forignkey}','{selected}',current_timestamp)"
+                  f"'{forignkey}','{user.name}','{selected}',current_timestamp)"
             saveDB(msg)
 
 
@@ -392,8 +559,7 @@ class ST_PAGE(QDialog):
             # classroom_id 폴더 서버에 생성하기
             CreateRawFile('folder', str(forienkey) + '/' + str(user_id))
         else:  # 기존에 등록되어있는 정보가 조회된다면?
-            if currentDB[0][1] != user.address and currentDB[0][
-                0] == user.name:  # ip 정보가 다르다면 다른 pc에서 접속한 것이므로, 이름은 같더라도 동일 인물일 수 있음, 따라서 등록을 진행한다.
+            if currentDB[0][1] != user.address and currentDB[0][0] == user.name:  # ip 정보가 다르다면 다른 pc에서 접속한 것이므로, 이름은 같더라도 동일 인물일 수 있음, 따라서 등록을 진행한다.
                 same = False
                 msg = f"insert into user_info values(default, '{forienkey}', '{user.name}','{user.address}','{user.userType}', True, True, False)"
                 saveDB(msg)
@@ -539,6 +705,7 @@ class thrClient(Thread):
 
                     global pauseclass
                     global C_S
+                    global detector
                     if msg == '수업시작':
                         C_S.setText("수업중")
                         font1 = C_S.font()
@@ -582,6 +749,7 @@ class thrClient(Thread):
                         C_S.setPointSize(12)
                         font2 = C_S.font()
                         font2.setBold(True)
+                        C_S.setFont(font1)
                         C_S.setStyleSheet("Color : red")
                         user.classOrder = msg
                         process.set_eventobj(None)
@@ -765,8 +933,66 @@ class thrProcessKill(threading.Thread):
                 continue
 
 
+# 눈 Crop 함수
+def crop_eye(img, eye_points):
+    x1, y1 = np.amin(eye_points, axis=0)
+    x2, y2 = np.amax(eye_points, axis=0)
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+    w = (x2 - x1) * 1.2
+    h = w * IMG_SIZE[1] / IMG_SIZE[0]
+
+    margin_x, margin_y = w / 2, h / 2
+
+    min_x, min_y = int(cx - margin_x), int(cy - margin_y)
+    max_x, max_y = int(cx + margin_x), int(cy + margin_y)
+
+    eye_rect = np.rint([min_x, min_y, max_x, max_y]).astype(np.int)
+
+    eye_img = img[eye_rect[1]:eye_rect[3], eye_rect[0]:eye_rect[2]]
+
+    return eye_img, eye_rect
+
+
+# 눈인식 함수
+def predictor_eye(gray, shapes):
+    global model
+    shapes = face_utils.shape_to_np(shapes)  # 찾은 랜드마크를 좌표로 저장하기
+
+    eye_img_l, eye_rect_l = crop_eye(gray,
+                                     eye_points=shapes[36:42])  # 저장된 랜드마크의 왼쪽 눈 좌표를 이용하여 이미지와 영상에 사각형을 그리기 위한 좌표 저장
+    eye_img_r, eye_rect_r = crop_eye(gray,
+                                     eye_points=shapes[42:48])  # 저장된 랜드마크의 오른쪽 눈 좌표를 이용하여 이미지와 영상에 사각형을 그리기 위한 좌표 저장
+    if eye_img_l.size == 0:
+        eye_img_l = np.ones(IMG_SIZE)
+    if eye_img_r.size == 0:
+        eye_img_r = np.ones(IMG_SIZE)
+
+    eye_img_l = cv2.resize(eye_img_l, dsize=IMG_SIZE)  # 왼쪽 눈 이미지 사이즈 변경
+    eye_img_r = cv2.resize(eye_img_r, dsize=IMG_SIZE)  # 오른쪽 눈 이미지 사이즈 변경
+    eye_img_r = cv2.flip(eye_img_r, flipCode=1)  # 오른쪽 눈 이미지 좌우반전 (왼쪽눈으로만 모델이 학습되어 있음)
+
+    #cv2.imshow('l', eye_img_l)  # 왼쪽 눈 크롭 프레임 보여주기
+    #cv2.imshow('r', eye_img_r)  # 오른쪽 눈 크롭 프레임 보여주기
+
+    eye_input_l = eye_img_l.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+    eye_input_r = eye_img_r.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+
+    pred_l = model.predict(eye_input_l)
+    pred_r = model.predict(eye_input_r)
+
+    # visualize
+    state_l = 'O %.1f' if pred_l > 0.1 else '- %.1f'
+    state_r = 'O %.1f' if pred_r > 0.1 else '- %.1f'
+
+    state_l = state_l % pred_l
+    state_r = state_r % pred_r
+
+    return eye_rect_l, eye_rect_r, state_l, state_r, pred_l, pred_r
+
 class thrFaceDetection(Thread):
     event = None
+
 
     def __init__(self, detector):
         super(thrFaceDetection, self).__init__()
@@ -778,13 +1004,21 @@ class thrFaceDetection(Thread):
         self.codec = cv2.VideoWriter_fourcc(*'DIVX')  # Codec 설정
         # self.frame = None
         self.prevCamStatus = False
-
     def set_eventobj(self, Event):
         self.event = Event
 
     def run(self):
         # Read the next frame from the stream in a different thread
         global pauseclass
+
+        global no_face
+        global no_eye
+        global start_time_f
+        global start_time_e
+        global sec_c
+        global close
+        global eye_cycle
+        global recording_eye
         sleep = 0
         start_time = 0
         end_time = 0
@@ -792,6 +1026,8 @@ class thrFaceDetection(Thread):
         self.thread.daemon = True
         self.thread.start()
         self.prevCamStatus = False
+
+        #out = cv2.VideoWriter('new.mp4', self.codec, self.fc, (640, 480))
         while (self.event):
             if not pauseclass:
                 if self.capture.isOpened():
@@ -821,7 +1057,11 @@ class thrFaceDetection(Thread):
                     if (self.camOn):
                         (h, w) = self.frame.shape[:2]
 
-                        imageBlob = cv2.dnn.blobFromImage(cv2.resize(self.frame, (300, 300)), 1.0, (300, 300),
+                        self.img = self.frame.copy()  # 복사본 생성
+                        self.img = cv2.flip(self.img, 1)  # 화면 좌우 반전
+                        gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)  # Frame 색상을 회색으로 변경
+
+                        imageBlob = cv2.dnn.blobFromImage(cv2.resize(self.img, (300, 300)), 1.0, (300, 300),
                                                           (104.0, 177.0, 123.0), swapRB=False, crop=False)
 
                         self.detector.setInput(imageBlob)
@@ -835,50 +1075,99 @@ class thrFaceDetection(Thread):
                                 box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
                                 (startX, startY, endX, endY) = box.astype("int")
 
-                                face = self.frame[startY:endY, startX:endX]
+                                face = self.img[startY:endY, startX:endX]
 
-                                cv2.rectangle(self.frame, (startX, startY), (endX, endY), (255, 255, 255), 2)
+                                cv2.rectangle(self.img, (startX, startY), (endX, endY), (255, 255, 255), 2)
 
-                        self.frame = cv2.flip(self.frame, 1)
-                        cv2.putText(self.frame, text=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
+                                shapes = predictor(gray, dlib.rectangle(startX, startY, endX,
+                                                                        endY))  # 얼굴의 랜드마크 (눈, 코, 입, 턱선, 눈썹) 찾기
+                                eye_rect_l, eye_rect_r, state_l, state_r, p_l, p_r = predictor_eye(gray, shapes)
+                                white = (255, 255, 255)
+                                red = (255,0,0)
+
+
+
+                                cv2.rectangle(self.img, pt1=tuple(eye_rect_l[0:2]), pt2=tuple(eye_rect_l[2:4]),
+                                              color=white if p_l > 0.5 else red,
+                                              thickness=2)
+                                cv2.rectangle(self.img, pt1=tuple(eye_rect_r[0:2]), pt2=tuple(eye_rect_r[2:4]),
+                                              color=white if p_r > 0.5 else red,
+                                              thickness=2)
+
+                                cv2.putText(self.img, state_l, tuple(eye_rect_l[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                            white if p_l > 0.5 else red, 2)
+                                cv2.putText(self.img, state_r, tuple(eye_rect_r[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                            white if p_r > 0.5 else red, 2)
+
+                        #self.frame = cv2.flip(self.frame, 1)
+                        cv2.putText(self.img, text=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
                                     org=(30, 460),
                                     fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                                     color=(0, 255, 0), thickness=2)
-                        self.lastframe = self.frame
+                        self.showframe = self.img
+                        #out.write(self.showframe)
                         # cv2.imshow("Frame", self.frame)
 
                         if len(face) == 0:
-                            sleep = sleep + 1
-                            if sleep == 1:
-                                videoname = time.strftime('%Y-%m-%d %Hh %Mm',
+                            no_face = no_face + 1
+                            if no_face == 1:
+                                no_face_time = 0
+                                recording_face = 1
+
+                                videoname_f = time.strftime('%Y-%m-%d %Hh %Mm %Ss_breakaway',
                                                           time.localtime(time.time()))
-                                out = cv2.VideoWriter(videoname + '.mp4', self.codec, self.fc,
+                                out_face = cv2.VideoWriter(videoname_f + '.mp4', self.codec, self.fc,
                                                       (int(self.capture.get(3)),
                                                        int(self.capture.get(4))))
-                                print('파일 생성:', videoname + '.mp4')
+                                out_face.write(self.img)
+                                start_time_f = time.time()
+                                print('파일 생성:', videoname_f + '.mp4')
+                                #start_sleep_time = time.time()
+                                #st_timestamp = time.strftime("%d-%b-%Y (%H:%M:%S.%f)")
+                                ts = datetime.datetime.now()  # needs to be converted to a string
+                                st_timestamp = ts.strftime("%d-%b-%Y (%H:%M:%S.%f)")
                                 start_time = time.time()
-                            else:
-                                out.write(self.frame)
-                        else:
-                            if sleep >= 1:
-                                sleep = 0
-                                end_time = time.time()
-                                checked_time = end_time - start_time
-                                out.release()
-                                if checked_time < 30:
-                                    print("ok")
-                                    os.remove(videoname + '.mp4')
+                            if recording_eye == 1:
+                                out_eye.release()
+                                recording_eye = 0
+                                sec_c = 0
+                                eye_cycle = 0
+                                close = 0
+                                if no_eye >= 1:
+                                    no_eye_time = 30 * no_eye
+                                    print(str(datetime.timedelta(seconds=no_eye_time)) + ' 동안 졸았음')
+                                    no_eye = 0
                                 else:
+                                    print("remove " + videoname_e + " video")
+                                    os.remove(videoname_e + '.mp4')
+                            no_face_time = time.time() - start_time_f
+
+                            if no_face_time <= 300:
+                                out_face.write(self.img)
+                            elif no_face_time > 300 and recording_face == 1:
+                                out_face.release()
+                                recording_face = 0
+                        else:
+                            if no_face >= 1:
+                                no_face = 0
+                                if recording_face == 1:
+                                    out_face.release()
+                                    recording_face = 0
+                                if no_face_time < 30:
+                                    print("remove " + videoname_f + " video")
+                                    os.remove(videoname_f + '.mp4')
+                                else: # 자리이탈 인식
+                                    print(str(datetime.timedelta(seconds=math.floor(no_face_time))) + ' 동안 얼굴이 인식 안 됨')
                                     # 자리이탈 인식 했으니 DB에 정보 insert 및 소켓통신으로 서버에 파일 저장
                                     ngmode = 'BREAKAWAY'
                                     user.breakaway = True
-
-                                    user_id = \
-                                        saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
+                                    ts = datetime.datetime.now()  # needs to be converted to a string
+                                    end_timestamp = ts.strftime("%d-%b-%Y (%H:%M:%S.%f)")
+                                    user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
                                     msg = f"insert into ng_records values(default, " \
-                                          f"'{user_id}','{ngmode}', current_timestamp,'{videoname + '.mp4'}')"
+                                          f"'{user_id}','{user.name}''{ngmode}', '{st_timestamp}','{end_timestamp}','{videoname_f + '.mp4'}')"
                                     saveDB(msg)
-                                    print(checked_time)
+                                    #print(checked_time)
                                     print('졸음이 인식 됨')
                                     # 소켓통신으로 서버에 파일 저장
 
@@ -889,23 +1178,65 @@ class thrFaceDetection(Thread):
                                             f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[
                                             0]
 
-                                    filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname + '.mp4'
+                                    filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname_f + '.mp4'
                                     # global socketClient
                                     # socketClient.send_file(videoname+'.mp4')
                                     CreateRawFile('file', filepath)
+                            eye_cycle = eye_cycle + 1
+                            if eye_cycle == 1:
+                                eye_cycle_time = 0
+                                start_time_e = time.time()
+
+                            if eye_cycle == 1 and no_eye == 0:
+                                recording_eye = 1
+                                videoname_e = time.strftime('%Y-%m-%d %Hh %Mm %Ss_sleep', time.localtime(time.time()))
+                                out_eye = cv2.VideoWriter(videoname_e + '.mp4', self.codec, self.fc,
+                                                          (int(self.capture.get(3)), int(self.capture.get(4))))
+                                print('파일 생성:', videoname_e + '.mp4')
+                                out_eye.write(self.img)
+
+                            eye_cycle_time = time.time() - start_time_e
+
+                            if recording_eye == 1:
+                                out_eye.write(self.img)
+                            if math.floor(eye_cycle_time) == sec_c:
+                                sec_c = sec_c + 1
+                                if math.floor(max(p_l, p_r) * 10) == 0:
+                                    close = close + 1
+
+                            if sec_c == 30:
+                                sec_c = 0
+                                eye_cycle = 0
+                                if close >= 24:
+                                    no_eye = no_eye + 1
+                                    if no_eye == 1:
+                                        print('졸음이 인식되었습니다.')
+                                    elif no_eye == 10:
+                                        out_eye.release()
+                                        recording_eye = 0
+                                else:
+                                    if recording_eye == 1:
+                                        out_eye.release()
+                                        recording_eye = 0
+                                    if no_eye >= 1:
+                                        no_eye_time = 30 * no_eye
+                                        print(str(datetime.timedelta(seconds=no_eye_time)) + ' 동안 졸았음')
+                                        no_eye = 0
+                                    else:
+                                        print("remove " + videoname_e + " video")
+                                        os.remove(videoname_e + '.mp4')
+                                close = 0
+
 
                     else:
                         user.cam_is_valid = False
                         str_cam_is_valid = 'CAM_OFF'
 
-                        uesr_search = \
-                            saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
+                        uesr_search = saveDB(f"select user_id, classroom_id from user_info where user_ip='{user.address}'")[0]
 
                         saveDB(f"update user_info set cam_status='{user.cam_is_valid}' where user_ip='{user.address}'")
 
-                        msg = f"insert into state_records values(default, " \
-                              f"'{uesr_search[0]}','{user.name}','{uesr_search[1]}','{str_cam_is_valid}','{user.cam_is_valid}'," \
-                              f"'{user.User_is_on_seat}',current_timestamp)"
+                        msg = f"insert into state_records values(default, '{uesr_search[0]}','{user.name}','{uesr_search[1]}','{str_cam_is_valid}','{user.cam_is_valid}','{user.User_is_on_seat}',current_timestamp)"
                         saveDB(msg)
 
                         msgBox = QMessageBox()
@@ -927,7 +1258,6 @@ class thrFaceDetection(Thread):
                         # exit_program()
                         # else:
                         #
-
                         print('Please turn off other camera program!')
                         break
                 else:
@@ -941,10 +1271,11 @@ class thrFaceDetection(Thread):
                     msgBox.setDefaultButton(QMessageBox.Yes)  # 포커스가 지정된 기본 버튼
                     msgBox.exec_()  # 클릭한 버튼 결과 리턴
                     break
+                #time.sleep(.01)
 
-                # time.sleep(.01)
-
+        pauseclass = True
         self.capture.release()
+        cv2.destroyAllWindows()
         # cv2.destroyAllWindows()
 
     def update(self):
@@ -955,14 +1286,15 @@ class thrFaceDetection(Thread):
         while self.event:
             try:
                 if not pauseclass:
-                    cv2.imshow('For presenting', self.lastframe)
-                    time.sleep(0.01)
-
+                    cv2.imshow('For presenting', self.showframe)
+                    time.sleep(.01)
+                    #self.out.write(self.showframe)
                     key = cv2.waitKey(1)
                     if key == ord('q') and pauseclass:
-                        # pauseclass = True
+                        #out.release()
                         self.capture.release()
                         cv2.destroyAllWindows()
+                        pauseclass = True
                         exit(1)
 
             except AttributeError:
