@@ -3,6 +3,7 @@
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import *
 from PyQt5 import uic,QtWebEngineWidgets
+from PyQt5.QtCore import Qt, pyqtSlot
 import random, itertools, threading, os, socket, cv2, time, sys, paramiko, stat, psutil, subprocess, atexit, math
 from requests import get
 from DB_contorol import saveDB, getDataFrameFromPSQL
@@ -384,11 +385,30 @@ class DialogDataVisualization(QDialog):
         self.tableWidget.setModel(model_sales)
         self.verticalLayout_4.addWidget(self.tableWidget)
 
-
         self.tableWidget_student = QTableView()
         self.verticalLayout_5.addWidget(self.tableWidget_student)
+        # Right        mouse        action
+
+        self.tableWidget_student.setContextMenuPolicy(Qt.ActionsContextMenu)
+        save_action = QAction("mp4 파일 내려받기", self.tableWidget_student)
+        self.tableWidget_student.addAction(save_action)
+        save_action.triggered.connect(self.__save_mp4)
         # self.setLayout(layout)
         self.show()
+
+    @pyqtSlot()
+    def __save_mp4(self):
+        row = self.tableWidget_student.currentIndex().row()
+        column = self.tableWidget_student.currentIndex().column()
+        print(row, column)
+        item = self.df_sub.iloc[row, 0]
+        file = self.df_sub.iloc[row, 6]
+        if not (type(file) == float):
+            key = saveDB(f"select user_id, classroom_id from user_info where "
+                   f"user_name='{item}'")
+
+            file = str(key[0][1])+'/'+str(key[0][0])+'/'+self.df_sub.iloc[row, 6]
+            GetFileFromServer('file', file)
 
     def tableWidget_doubleClicked(self):
         row = self.tableWidget.currentIndex().row()
@@ -420,6 +440,17 @@ class DialogDataVisualization(QDialog):
 
 
 
+def GetFileFromServer(type, name):  #
+    remote_path = '/home/ec2-user/CSS/'
+    if type == 'file':
+        file = name
+        remote_file = remote_path + file
+        print(sftp.listdir(remote_path))
+        file = file.split('/')
+        file = file[-1]
+        sftp.get(remote_file, file)  # 파일 업로드
+
+    #print("done")
 
 
 def CreateRawFile(type, name):  #
@@ -754,6 +785,8 @@ class thrClient(Thread):
                         user.classOrder = msg
                         process.set_eventobj(None)
                         facedetector.set_eventobj(None)
+
+                        self.viewDataResult = DialogDataVisualization(self)
 
 
                 elif user.userType == False:  # 교수는 학생 이름을 모니터링 할 수 있다.
