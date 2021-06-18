@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+from multiprocessing import Process
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import *
 from PyQt5 import uic,QtWebEngineWidgets
@@ -17,6 +17,10 @@ import pandas as pd
 import dlib
 from keras.models import load_model
 from imutils import face_utils
+import tensorflow as tf
+
+
+#pool.map()
 '''
 /***************************************************************/
             user( 사용자 정보를 다루는 클래스 전역 선언 )
@@ -55,32 +59,20 @@ class UserInfo:
     def __init__(self):
         self.address = ipcheck()
 
-
-user = UserInfo()
-
+user = None
+ssh = None
+sftp = None
+procs = [] ## process thread list
 FORMAT = 'utf-8'
 # temp data
 host = '13.124.19.47'
 username = 'ec2-user'
-ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect(host, username=username, key_filename='jusu.pem')
-sftp = None
-sftp = ssh.open_sftp()
 
 # 눈 크롭 프레임 사이즈 조정용
 IMG_SIZE = (34, 26)
 protoPath = "face_detector/deploy.prototxt"
 modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
 
-# 얼굴 랜드마크 & 눈인식 모델 설정
-predictor = dlib.shape_predictor('models/shape_predictor_68_face_landmarks.dat')
-model = load_model('models/2018_12_17_22_58_35.h5')
-model.summary()
-eye_img_l = np.zeros(IMG_SIZE)
-eye_input_l = eye_img_l.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
-model.predict(eye_input_l)
 PR_guestlist = None
 pauseclass = False
 socketClient = False
@@ -458,9 +450,10 @@ def CreateRawFile(type, name):  #
     if type == 'file':
         file = name
         remote_file = remote_path + file
-        print(sftp.listdir(remote_path))
+        #print(sftp.listdir(remote_path))
         file = file.split('/')
         file = file[-1]
+        print(file, '--파일을 리눅스 서버로 전송 where? -- ', remote_file)
         sftp.put(file, remote_file)  # 파일 업로드
     elif type == 'folder':
         folder = name
@@ -478,7 +471,7 @@ def CreateRawFile(type, name):  #
         # sftp.mkdir(remote_file)
         print(sftp.listdir(remote_file))
 
-    print("done")
+    print("파일 서버로 전송 완료 done")
 
 
 class PR_PAGE(QDialog):
@@ -492,8 +485,8 @@ class PR_PAGE(QDialog):
 
         self.Class_Status.currentIndexChanged.connect(self.onSelected)
 
-        event = threading.Event()
-        event.clear()
+        #event = threading.Event()
+        #event.clear()
 
         # room info, user_info DB table 에 user, room code 등록
         # 기존 로그인과 동일하다면?
@@ -526,16 +519,16 @@ class PR_PAGE(QDialog):
                   f"'{forignkey}','{user.name}','{user.address}','{user.userType}'" \
                   f", True, False, False)"
             saveDB(msg)
-        user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
+        user_id = saveDB(f"select user_id from user_info where user_name='{user.name}'")[0][0]
         CreateRawFile('folder', str(forignkey) + '/' + str(user_id))
 
         # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
         global socketClient
-        socketClient = thrClient()
-        socketClient.set_eventobj(event)
+        socketClient = thrClient(0)
+        #socketClient.set_eventobj(event)
         socketClient.daemon = True
         socketClient.start()
-
+        procs.append(socketClient)
         self.show()
 
     def closeEvent(self, QCloseEvent):
@@ -560,7 +553,7 @@ class PR_PAGE(QDialog):
             # dp update
             forignkey = saveDB(f"select classroom_id from room_info where room_code='{user.classRoom_id}'")[0][0]
             msg = f"insert into order_records values(default, " \
-                  f"'{forignkey}','{user.name}','{selected}',current_timestamp)"
+                  f"'{forignkey}','{selected}',current_timestamp)"
             saveDB(msg)
 
 
@@ -601,14 +594,15 @@ class ST_PAGE(QDialog):
                 # 유저 이름 정도 업데이트
                 saveDB(f"update user_info set user_name='{user.name}' where user_ip='{user.address}'")
 
-        event = threading.Event()
-        event.clear()
+        #event = threading.Event()
+        #event.clear()
         # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
-        global socketClient
-        socketClient = thrClient()
-        socketClient.set_eventobj(event)
+        #global socketClient
+        socketClient = thrClient(0)
+        #socketClient.set_eventobj(event)
         socketClient.daemon = True  # 프로그램 종료시 프로세스도 함께 종료 (백그라운드 재생 X)
         socketClient.start()
+        procs.append(socketClient)
         # 전송시 ip, 사용자 이름, 사용자
         # self.message.send('주수현')
 
@@ -702,11 +696,13 @@ class PR_GUEST_LIST(QDialog):
             QCloseEvent.ignore()
 
 
-class thrClient(Thread):
-    event = None
+class thrClient(Process):
+    #event = None
 
-    def __init__(self):
-        super(thrClient, self).__init__()
+    def __init__(self, id):
+        super(Process, self).__init__()
+        self.id = id
+        self.processid = os.getpid()
         PORT = 6129
 
         SERVER = '13.124.19.47'  # '211.243.176.12'#'13.124.19.47'
@@ -717,14 +713,14 @@ class thrClient(Thread):
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client.connect(ADDR)
 
-        t = Thread(target=self.rcvMsg, args=())
-        t.daemon = True
+        t = Thread(target=self.rcvMsg, args=(),daemon=True)
         t.start()
         self.client.send(str(user.name + ',' + user.classRoom_id).encode())  # 서버에서 유저를 최초로 등록을 한다.
         # 그 이후 메시지는 자율적으로 보낸다. self.client.send
 
     def rcvMsg(self):  ## 서버로부터 메세지를 수신 받는 부분
         global PR_guestlist
+        print("Current thread: ", threading.current_thread().getName())
         while True:
             try:
                 data = self.client.recv(1024)
@@ -735,6 +731,7 @@ class thrClient(Thread):
                     print(msg)
 
                     global pauseclass
+
                     global C_S
                     global detector
                     if msg == '수업시작':
@@ -747,16 +744,19 @@ class thrClient(Thread):
                         user.classOrder = msg
                         event = threading.Event()
                         event.clear()
-                        facedetector = thrFaceDetection(detector)
-                        process = thrProcessKill()
+                        facedetector = thrFaceDetection(detector,2)
+
                         # thread 2 수업시작 명령시 얼굴인식 Thread on
                         facedetector.set_eventobj(event)
                         facedetector.daemon = True
                         facedetector.start()
                         # thread 3 수업 시작 명령시 게임, 메신저 프로세스 감시 thread on
-                        process.set_eventobj(event)
+                        process = thrProcessKill(1)
+                       # process.set_eventobj(event)
                         process.daemon = True
+                        #process.set_eventobj(event)
                         process.start()
+                        procs.append(process)
                     if msg == '쉬는시간':
                         C_S.setText("쉬는시간")
                         font1 = C_S.font()
@@ -776,17 +776,21 @@ class thrClient(Thread):
                         user.classOrder = msg
                         pauseclass = False
                     if msg == '수업종료':
+                        facedetector.set_eventobj(None)
+                        #process.set_eventobj(None)
+
                         C_S.setText("수업종료")
-                        C_S.setPointSize(12)
-                        font2 = C_S.font()
-                        font2.setBold(True)
+                        font1 = C_S.font()
+                        font1.setPointSize(12)
+                        font1.setBold(True)
                         C_S.setFont(font1)
                         C_S.setStyleSheet("Color : red")
                         user.classOrder = msg
-                        process.set_eventobj(None)
-                        facedetector.set_eventobj(None)
-
-                        self.viewDataResult = DialogDataVisualization(self)
+                        #DialogDataVisualization(C_S)
+                        # 프로세스 감시와 통신 스레드 및 얼굴분석 종료
+                        for p in procs:
+                            p.terminate()
+                            p.join()
 
 
                 elif user.userType == False:  # 교수는 학생 이름을 모니터링 할 수 있다.
@@ -815,13 +819,14 @@ class thrClient(Thread):
             except:
                 pass
 
-    def set_eventobj(self, Event):
-        self.event = Event
+    #def set_eventobj(self, Event):
+    #    self.event = Event
 
     def run(self):
         while True:
-            if not self.event:
-                break
+            tt = 0
+            #if not self.event:
+            #   break
 
     def send(self, msg):
         # 여기서 문자열을 전송할 때 encode()을 이용한다
@@ -880,14 +885,17 @@ def getProcessRunList():
     return pc_list
 
 
-class thrProcessKill(threading.Thread):
-    event = None
+class thrProcessKill(Process):
+    #event = None
 
-    def __init__(self):
-        super(thrProcessKill, self).__init__()
+    def __init__(self, id):
+        super(Process, self).__init__()
+        self.id = id
+        self.processid= os.getpid()
+        print(self.processid)
 
-    def set_eventobj(self, Event):
-        self.event = Event
+    #def set_eventobj(self, Event):
+    #    self.event = Event
 
     def run(self):
         # if self.event == None:
@@ -895,9 +903,10 @@ class thrProcessKill(threading.Thread):
         # global paused
         global pauseclass
         # prevCamStatus = False
-        while (self.event):
+        while True:
             if not pauseclass:
                 # prevCamStatus = self.camOn
+
                 myprocesslist = getProcessRunList()  # 현재 실행중인 프로세스 리스트 불러오기
                 myset = set(myprocesslist)  # 중복값 제거
                 my_list = list(myset)  # 리스트로 변환
@@ -956,13 +965,14 @@ class thrProcessKill(threading.Thread):
                 # ,'RiotClientServices.exe','fifa4launcher.exe','fifa4zf.exe','nProtect.exe','Webview-render.exe','GnAgent.exe','GameBar.exe','GameBarFTServer.exe','NGM64.exe','GnStart.exe','BlackCipher64.aes','Discord.exe','kakaotalk.exe','Gersang.exe','Gunz.exe','BlackDesert32.exe','BlackDesert64.exe','PSkin.exe','goonzu.exe','Client_Shipping.exe   ','nal.exe','NoxGame.exe','poker.exe','Baduk2.exe','JangGi.exe','Northgard.exe','NX.exe','NFSEdge.exe','Dungeons3.exe','deadcells.exe','destiny2.exe','ActionSquad.exe','dota2.exe','DragonNest.exe','dro_client.exe','Droiyan Online.exe','Zero Ragexe.exe','Layers Of Fear.exe','RainbowSix.exe','RailwayEmpire.exe','LoR.exe','lodoss.exe','LOSTARK.exe','League of Legends.exe','LolClient.exe','LolClient.exe','LeagueClient.exe','Lineage2M.exe','Ma9Ma9Remaster.exe','Marvel End Time Arena.exe','MarvelHeroes2016.exe','client.exe','Mafia3.exe','MapleStory2.exe','MapleStory.exe','FTGame.exe','MULegend.exe','mir2.exe','mir2_WinMode.exe','vikings.exe','VALORANT-Win64-Shipping.exe','TslGame.exe','Battlerite.exe','BattleriteRoyale.exe','Borderlands2.exe','BorderlandsPreSequel.exe','BoilingBolt-Win64-Shipping.exe','VictorVran.exe','puyopuyoesports.exe','Syberia3.exe','Cyphers.exe','ShadowArena64.exe','shadows.exe','SuddenStrike4.exe','suddenattack.exe','seiya.exe','Sherlock.exe','smc.exe','SoulWorker.exe','SuperPixelRacers.exe','SSF_Release.exe','starcraft.exe','Steredenn.exe','StrikersEdge.exe','Splasher.exe','CivilizationV_DX11.exe','CivilizationVI.exe','CivBE_Win32_DX11.exe','Client.exe','Arpiel.exe','Asgard.exe','Astellia.exe','game.bin','Indiana-Win64-Shipping.exe','iron_sight.exe','Atlantica.exe','Ancestors-Win64-Shipping.exe','Legend.exe','AscendantOne-Win64-Shipping.exe','EOS.exe','ACEonline.atm','shooter_win64_release.exe','XCom2.exe','XCom2_WOTC.exe','ELYON.exe','x2.exe','YG2.exe','EternalReturn.exe','OrO20.exe','OldSchoolMusical.exe','TheObserver-Win64-Shipping.exe','WB.exe','Warcraft III.exe','WorldOfWarships.exe','ImmortalRealms.exe','City3.exe','Elancia.exe','Genesis4Live.exe','PSkinII.exe','Sky.exe','Sky_x64.exe','MFishing.exe','MCGame-Final.exe','TslGame.exe','engine.exe','ctgo2.exe','CoreMasters.exe','ModernWarfare.exe','BlackOps4.exe','BlackOpsColdWar.exe','crossfire.exe','Crookz.exe','CW.EXE','TygemBaduk.exe','InphaseNXD.exe','Tropico5.exe','Tropico6-Win64-Shipping.exe','Client_tos.exe','  Client_tos_x64.exe','PointBlank.exe','FortniteClient-Win64-Shipping.exe','FortressV2.exe','Furi.exe','HitGame.exe','FSeFootball.exe','pmangPoker.exe','pmangvegas.exe','PMANGSLOTS.exe','fifazf.exe','PillarsOfEternity.exe','Hearthstone.exe','HoundsApp.exe','HyperUniverse.exe','duelgo.exe','Hanjanggi.exe','Hand of Fate 2.exe','Hover.exe','Holic2.exe   ','Among US.exe','r5apex.exe','borealblade_64bit.exe','Cities.exe','CookingSim.exe','disco.exe','DyingLightGame.exe','Eco.exe','fifa4zf.exe','Forge and Fight.exe','FuryUnleashed.exe','hl2.exe','GasGuzzlers.exe','GTFO.exe','HelloNeighbor-Win64-Shipping.exe','HouseFlipper.exe','HuntGame.exe','Injustice2.exe','INSIDE.exe','Game-Win64-Shipping.exe','KingdomCome.exe','left4dead2.exe','Mordhau-Win64-Shipping.exe','LF-Win64-Shipping.exe','Phasmophobia.exe','hl2.exe','SpaceAssault-Win64-Shipping.exe','RimWorldWin64.exe','Shieldwall-Win64-Shipping.exe','Sky Force Reloaded.exe','Stardew Valley.exe','SH.exe','SuperliminalSteam.exe','Terraria.exe','TheForest.exe','witcher3.exe','TheyAreBillions.exe','thief.exe','Thrones.exe','Trailmakers.exe','trine4.exe','UltimateZombieDefense_64.exe','UnrailedGame.exe','YAZD_HD.exe']
                 #
                 # 중복하는가?
-                # print('runing')
+                #print('runing')
                 isrunning = list(set(my_list).intersection(block_Process_list))
                 for process in isrunning:
                     subprocess.call('taskkill /F /IM ' + process)
                     time.sleep(0.001)  # 밀리초(1/1000초
                     CREATE_NO_WINDOW = 0x08000000
                     subprocess.call('taskkill /F /IM ' + process, creationflags=CREATE_NO_WINDOW)
+                    print(process, 'is killed')
                 continue
 
 
@@ -1027,8 +1037,9 @@ class thrFaceDetection(Thread):
     event = None
 
 
-    def __init__(self, detector):
+    def __init__(self, detector, id):
         super(thrFaceDetection, self).__init__()
+        self.id = id
         self.detector = detector
         self.capture = cv2.VideoCapture(0)
         self.capture.set(3, 640)  # 윈도우 크기
@@ -1041,6 +1052,7 @@ class thrFaceDetection(Thread):
         self.event = Event
 
     def run(self):
+        print("Current thread: ", threading.current_thread().getName())
         # Read the next frame from the stream in a different thread
         global pauseclass
 
@@ -1126,7 +1138,6 @@ class thrFaceDetection(Thread):
                                 cv2.rectangle(self.img, pt1=tuple(eye_rect_r[0:2]), pt2=tuple(eye_rect_r[2:4]),
                                               color=white if p_r > 0.5 else red,
                                               thickness=2)
-
                                 cv2.putText(self.img, state_l, tuple(eye_rect_l[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                                             white if p_l > 0.5 else red, 2)
                                 cv2.putText(self.img, state_r, tuple(eye_rect_r[0:2]), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -1197,8 +1208,9 @@ class thrFaceDetection(Thread):
                                     ts = datetime.datetime.now()  # needs to be converted to a string
                                     end_timestamp = ts.strftime("%d-%b-%Y (%H:%M:%S.%f)")
                                     user_id = saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
-                                    msg = f"insert into ng_records values(default, " \
-                                          f"'{user_id}','{user.name}''{ngmode}', '{st_timestamp}','{end_timestamp}','{videoname_f + '.mp4'}')"
+                                    classroom_id = saveDB(f"select classroom_id from user_info where user_ip='{user.address}'")[0][0]
+                                    msg = f"insert into ng_records values(default, '{classroom_id}'," \
+                                          f"'{user_id}','{user.name}','{ngmode}', '{st_timestamp}','{end_timestamp}','{videoname_f + '.mp4'}')"
                                     saveDB(msg)
                                     #print(checked_time)
                                     print('졸음이 인식 됨')
@@ -1214,7 +1226,9 @@ class thrFaceDetection(Thread):
                                     filepath = str(userinfo[0]) + '/' + str(userinfo[1]) + '/' + videoname_f + '.mp4'
                                     # global socketClient
                                     # socketClient.send_file(videoname+'.mp4')
-                                    CreateRawFile('file', filepath)
+                                    thr= Thread(target=CreateRawFile, args=('file', filepath), daemon=True)
+                                    thr.start()
+
                             eye_cycle = eye_cycle + 1
                             if eye_cycle == 1:
                                 eye_cycle_time = 0
@@ -1228,6 +1242,8 @@ class thrFaceDetection(Thread):
                                 print('파일 생성:', videoname_e + '.mp4')
                                 out_eye.write(self.img)
 
+                                ts = datetime.datetime.now()  # needs to be converted to a string
+                                st_timestamp = ts.strftime("%d-%b-%Y (%H:%M:%S.%f)")
                             eye_cycle_time = time.time() - start_time_e
 
                             if recording_eye == 1:
@@ -1255,6 +1271,37 @@ class thrFaceDetection(Thread):
                                         no_eye_time = 30 * no_eye
                                         print(str(datetime.timedelta(seconds=no_eye_time)) + ' 동안 졸았음')
                                         no_eye = 0
+                                        # 졸음 인식 했으니 DB에 정보 insert 및 소켓통신으로 서버에 파일 저장
+                                        ngmode = 'SLEEP'
+
+                                        user.sleep = True
+                                        ts = datetime.datetime.now()  # needs to be converted to a string
+                                        end_timestamp = ts.strftime("%d-%b-%Y (%H:%M:%S.%f)")
+                                        user_id = \
+                                        saveDB(f"select user_id from user_info where user_ip='{user.address}'")[0][0]
+                                        classroom_id = \
+                                        saveDB(f"select classroom_id from user_info where user_ip='{user.address}'")[0][
+                                            0]
+                                        msg = f"insert into ng_records values(default, '{classroom_id}'," \
+                                              f"'{user_id}','{user.name}','{ngmode}', '{st_timestamp}','{end_timestamp}','{videoname_e + '.mp4'}')"
+                                        saveDB(msg)
+                                        # print(checked_time)
+                                        print('졸음이 인식 됨')
+                                        # 소켓통신으로 서버에 파일 저장
+
+                                        # socketClient.send_file(videoname+'.mp4')
+                                        # classroom_id/user_id/.mp4
+                                        userinfo = \
+                                            saveDB(
+                                                f"select classroom_id, user_id from user_info where user_ip='{user.address}'")[
+                                                0]
+
+                                        filepath = str(userinfo[0]) + '/' + str(
+                                            userinfo[1]) + '/' + videoname_e + '.mp4'
+                                        # global socketClient
+                                        # socketClient.send_file(videoname+'.mp4')
+                                        thr = Thread(target=CreateRawFile, args=('file', filepath), daemon=True)
+                                        thr.start()
                                     else:
                                         print("remove " + videoname_e + " video")
                                         os.remove(videoname_e + '.mp4')
@@ -1304,7 +1351,7 @@ class thrFaceDetection(Thread):
                     msgBox.setDefaultButton(QMessageBox.Yes)  # 포커스가 지정된 기본 버튼
                     msgBox.exec_()  # 클릭한 버튼 결과 리턴
                     break
-                #time.sleep(.01)
+                time.sleep(.01)
 
         pauseclass = True
         self.capture.release()
@@ -1316,6 +1363,8 @@ class thrFaceDetection(Thread):
         # frame = imutils.resize(self.frame, width=400)
         # self.frame =
         global pauseclass
+
+        print("Current thread: ", threading.current_thread().getName())
         while self.event:
             try:
                 if not pauseclass:
@@ -1351,10 +1400,32 @@ def exit_program():
     sftp.close()
     ssh.close()
     sys.exit()
+def initialize():
+    global user, sftp, predictor, detector
+    config = tf.compat.v1.ConfigProto()
+    config.gpu_options.per_process_gpu_memory_fraction = 0.4
+    session = tf.compat.v1.Session(config=config)
+    user = UserInfo()
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(host, username=username, key_filename='jusu.pem')
+    sftp = ssh.open_sftp()
+
+    # 얼굴 랜드마크 & 눈인식 모델 설정
+    predictor = dlib.shape_predictor('models/shape_predictor_68_face_landmarks.dat')
+    model = load_model('models/2018_12_17_22_58_35.h5')
+    detector = cv2.dnn.readNetFromCaffe(protoPath, modelPath)
+    model.summary()
+    eye_img_l = np.ones(IMG_SIZE)
+    eye_input_l = eye_img_l.copy().reshape((1, IMG_SIZE[1], IMG_SIZE[0], 1)).astype(np.float32) / 255.
+    print(eye_input_l.shape)
+    model.predict(eye_input_l)
 
 
 if __name__ == "__main__":
     atexit.register(savecounter)  # 프로그램 종료 시 이벤트 발생
+    initialize()
 
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon('icon/online-course-icon-57.png'))
