@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 from multiprocessing import Process
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import *
@@ -18,7 +19,6 @@ import dlib
 from keras.models import load_model
 from imutils import face_utils
 import tensorflow as tf
-
 
 #pool.map()
 '''
@@ -72,12 +72,12 @@ username = 'ec2-user'
 IMG_SIZE = (34, 26)
 protoPath = "face_detector/deploy.prototxt"
 modelPath = "face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-
+model = None
 PR_guestlist = None
 pauseclass = False
 socketClient = False
 app = None
-C_S = None
+ST_page = None
 
 # 변수 초기설정
 
@@ -258,8 +258,9 @@ class ST_LOGIN(QDialog):
                     # db Query insert room number
                     user.classRoom_id = roomnum
                     user.name = st_name
-                    self.ST_page = ST_PAGE(self)
+                    global ST_page
                     isnoRoom = False
+                    ST_page = ST_PAGE(self)
                     break
         if isnoRoom:
             QMessageBox.about(self, "Warning", "Room Code 가 유효하지 않습니다, 다시 시도 하십시오")
@@ -545,7 +546,8 @@ class PR_PAGE(QDialog):
         selected = self.Class_Status.currentText()
         # 수업시 학생이 한명이상이어야 한다.
         if selected == '수업종료':
-            self.viewDataResult = DialogDataVisualization(self)
+            DialogDataVisualization(self)
+
         if not selected == '' and len(student_login_list) >= 1:
             user.classOrder = selected
             msg = selected + ',' + user.classRoom_id
@@ -563,8 +565,7 @@ class ST_PAGE(QDialog):
         st_page_ui = 'ST_PAGE.ui'
         uic.loadUi(st_page_ui, self)
         self.Class_Status.currentIndexChanged.connect(self.onSelected)
-        global C_S
-        C_S = self.C_S
+
 
         # thread 1  로그인 성공하면 그때부터 사용자 정보 DB에 전송
         # clinet는 DB와 연결 한다
@@ -698,7 +699,6 @@ class PR_GUEST_LIST(QDialog):
 
 class thrClient(Process):
     #event = None
-
     def __init__(self, id):
         super(Process, self).__init__()
         self.id = id
@@ -715,13 +715,15 @@ class thrClient(Process):
 
         t = Thread(target=self.rcvMsg, args=(),daemon=True)
         t.start()
+
         self.client.send(str(user.name + ',' + user.classRoom_id).encode())  # 서버에서 유저를 최초로 등록을 한다.
         # 그 이후 메시지는 자율적으로 보낸다. self.client.send
 
     def rcvMsg(self):  ## 서버로부터 메세지를 수신 받는 부분
         global PR_guestlist
+        bStop = True
         print("Current thread: ", threading.current_thread().getName())
-        while True:
+        while bStop:
             try:
                 data = self.client.recv(1024)
                 if not data:
@@ -732,15 +734,15 @@ class thrClient(Process):
 
                     global pauseclass
 
-                    global C_S
+                    global ST_page
                     global detector
                     if msg == '수업시작':
-                        C_S.setText("수업중")
-                        font1 = C_S.font()
+                        ST_page.C_S.setText("수업중")
+                        font1 = ST_page.C_S.font()
                         font1.setPointSize(12)
                         font1.setBold(True)
-                        C_S.setFont(font1)
-                        C_S.setStyleSheet("Color : green")
+                        ST_page.C_S.setFont(font1)
+                        ST_page.C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         event = threading.Event()
                         event.clear()
@@ -758,40 +760,39 @@ class thrClient(Process):
                         process.start()
                         procs.append(process)
                     if msg == '쉬는시간':
-                        C_S.setText("쉬는시간")
-                        font1 = C_S.font()
+                        ST_page.C_S.setText("쉬는시간")
+                        font1 = ST_page.C_S.font()
                         font1.setPointSize(12)
                         font1.setBold(True)
-                        C_S.setFont(font1)
-                        C_S.setStyleSheet("Color : yellow")
+                        ST_page.C_S.setFont(font1)
+                        ST_page.C_S.setStyleSheet("Color : yellow")
                         user.classOrder = msg
                         pauseclass = True
                     if msg == '수업재개':
-                        C_S.setText("수업중")
-                        font1 = C_S.font()
+                        ST_page.C_S.setText("수업중")
+                        font1 = ST_page.C_S.font()
                         font1.setPointSize(12)
                         font1.setBold(True)
-                        C_S.setFont(font1)
-                        C_S.setStyleSheet("Color : green")
+                        ST_page.C_S.setFont(font1)
+                        ST_page.C_S.setStyleSheet("Color : green")
                         user.classOrder = msg
                         pauseclass = False
                     if msg == '수업종료':
-                        facedetector.set_eventobj(None)
-                        #process.set_eventobj(None)
-
-                        C_S.setText("수업종료")
-                        font1 = C_S.font()
-                        font1.setPointSize(12)
-                        font1.setBold(True)
-                        C_S.setFont(font1)
-                        C_S.setStyleSheet("Color : red")
-                        user.classOrder = msg
-                        #DialogDataVisualization(C_S)
                         # 프로세스 감시와 통신 스레드 및 얼굴분석 종료
                         for p in procs:
                             p.terminate()
                             p.join()
+                        facedetector.set_eventobj(None)
+                        #process.set_eventobj(None)
 
+                        ST_page.C_S.setText("수업종료")
+                        font1 = ST_page.C_S.font()
+                        font1.setPointSize(12)
+                        font1.setBold(True)
+                        ST_page.C_S.setFont(font1)
+                        ST_page.C_S.setStyleSheet("Color : red")
+                        user.classOrder = msg
+                        bStop = False
 
                 elif user.userType == False:  # 교수는 학생 이름을 모니터링 할 수 있다.
                     msg = data.decode()
@@ -906,7 +907,7 @@ class thrProcessKill(Process):
         while True:
             if not pauseclass:
                 # prevCamStatus = self.camOn
-
+                time.sleep(5)
                 myprocesslist = getProcessRunList()  # 현재 실행중인 프로세스 리스트 불러오기
                 myset = set(myprocesslist)  # 중복값 제거
                 my_list = list(myset)  # 리스트로 변환
@@ -1035,7 +1036,6 @@ def predictor_eye(gray, shapes):
 
 class thrFaceDetection(Thread):
     event = None
-
 
     def __init__(self, detector, id):
         super(thrFaceDetection, self).__init__()
@@ -1397,11 +1397,14 @@ def savecounter():
 
 def exit_program():
     savecounter()
+    for n in procs:
+        n.terminate()
+        n.join()
     sftp.close()
     ssh.close()
     sys.exit()
 def initialize():
-    global user, sftp, predictor, detector
+    global user, sftp, predictor, detector,model,ssh
     config = tf.compat.v1.ConfigProto()
     config.gpu_options.per_process_gpu_memory_fraction = 0.4
     session = tf.compat.v1.Session(config=config)
@@ -1426,11 +1429,11 @@ def initialize():
 if __name__ == "__main__":
     atexit.register(savecounter)  # 프로그램 종료 시 이벤트 발생
     initialize()
-
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon('icon/online-course-icon-57.png'))
     myWindow = MyWindow()
     myWindow.show()
+
     app.exec_()
     savecounter()
     sftp.close()
